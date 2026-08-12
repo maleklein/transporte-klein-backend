@@ -1,0 +1,15 @@
+{
+  "name": "transporte-klein-backend",
+  "version": "1.0.0",
+  "description": "Backend de transporte-klein",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.12.0"
+  }
+}
