@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const pool = require('./src/db');
-const authControllers = require('./src/Controllers/authControllers');
+const authControllers = require('./src/controllers/authControllers');
+const usuarioControllers = require('./src/controllers/usuarioControllers');
 
 const app = express();
 
@@ -16,6 +17,7 @@ pool.connect()
 
 // Rutas
 app.post('/auth/login', authControllers.login);
+app.post('/usuarios', usuarioControllers.crearUsuario);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
