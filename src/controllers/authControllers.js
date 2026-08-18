@@ -3,7 +3,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 const login = async (req, res) => {
-    const { email, password } = req.body;
+    const { email, contraseña } = req.body;
 
     try {
         // 1. Buscar si el usuario existe en la base de datos
@@ -16,7 +16,7 @@ const login = async (req, res) => {
         const user = result.rows[0];
 
         // 2. Verificar la contraseña encriptada
-        const validPassword = await bcrypt.compare(password, user.password);
+        const validPassword = await bcrypt.compare(contraseña, user.contraseña_hash);
         if (!validPassword) {
              return res.status(401).json({ message: 'Contraseña incorrecta' });
         }
