@@ -17,7 +17,9 @@ pool.connect()
 
 // Rutas
 app.post('/auth/login', authControllers.login);
+app.get('/usuarios', usuarioControllers.listarUsuarios);
 app.post('/usuarios', usuarioControllers.crearUsuario);
+app.put('/usuarios/:id', usuarioControllers.actualizarUsuario);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
