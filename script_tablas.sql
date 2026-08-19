@@ -37,6 +37,11 @@ CREATE TABLE CAMIONERO (
     capacidad_kg DECIMAL(10, 2)
 );
 
+-- TODO (HU 2.3 / GIA-35): esta tabla es hoy un catalogo de estados, pero la HU pide
+-- guardar el historial de transiciones con el usuario responsable y la marca de tiempo.
+-- Para eso necesita ser (id_carga, estado_anterior, estado_nuevo, id_actor, marca_tiempo).
+-- La dejamos como esta hasta acordarlo con quien tome GIA-35. Mientras tanto el estado
+-- vigente de cada carga vive en CARGA.estado_actual.
 CREATE TABLE ESTADO_CARGA (
     id_estado SERIAL PRIMARY KEY,
     descripcion VARCHAR(50) NOT NULL
@@ -44,10 +49,22 @@ CREATE TABLE ESTADO_CARGA (
 
 CREATE TABLE CARGA (
     id_carga SERIAL PRIMARY KEY,
-    descripcion TEXT NOT NULL,
-    peso DECIMAL(10, 2),
     origen VARCHAR(255) NOT NULL,
     destino VARCHAR(255) NOT NULL,
+    tipo_carga VARCHAR(100) NOT NULL,
+    peso DECIMAL(10, 2) NOT NULL,
+    fecha DATE NOT NULL,
+    observaciones TEXT NOT NULL,
+    descripcion TEXT,
+    estado_actual VARCHAR(30) NOT NULL DEFAULT 'disponible',
+    id_admin_creador INT NOT NULL REFERENCES USUARIO(id_usuario),
     id_camionero INT REFERENCES CAMIONERO(id_camionero),
-    id_estado INT REFERENCES ESTADO_CARGA(id_estado)
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Mismo criterio que en USUARIO: sin trigger, actualizado_en nunca se mueve.
+CREATE TRIGGER trigger_carga_actualizado_en
+BEFORE UPDATE ON CARGA
+FOR EACH ROW
+EXECUTE FUNCTION actualizar_timestamp();

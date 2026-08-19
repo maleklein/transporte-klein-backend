@@ -3,6 +3,7 @@ const cors = require('cors');
 const pool = require('./src/db');
 const authControllers = require('./src/controllers/authControllers');
 const usuarioControllers = require('./src/controllers/usuarioControllers');
+const cargaControllers = require('./src/controllers/cargaControllers');
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.post('/auth/login', authControllers.login);
 app.get('/usuarios', usuarioControllers.listarUsuarios);
 app.post('/usuarios', usuarioControllers.crearUsuario);
 app.put('/usuarios/:id', usuarioControllers.actualizarUsuario);
+app.post('/cargas', cargaControllers.crearCarga);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
