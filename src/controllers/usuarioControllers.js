@@ -7,7 +7,7 @@ const ROLES_VALIDOS = ['administrador', 'camionero'];
 
 const CAMPOS_EDITABLES = ['nombre', 'apellido', 'email', 'estado'];
 const CAMPOS_BLOQUEADOS = ['dni', 'rol', 'contraseña'];
-const ESTADOS_VALIDOS = ['activo', 'inactivo'];
+const ESTADOS_VALIDOS = ['activo', 'inactivo']; 
 
 const crearUsuario = async (req, res) => {
     const { nombre, apellido, dni, email, contraseña, ubicacion, tipo_vehiculo, capacidad_kg } = req.body;
@@ -94,7 +94,10 @@ const crearUsuario = async (req, res) => {
     }
 };
 
-// PUT /usuarios/:id: edita datos de un usuario existente. No permite tocar dni, rol ni contraseña.
+// PUT /usuarios/:id
+// Edita nombre, apellido, email y estado de un usuario existente; dni, rol y contraseña quedan protegidos.
+// Si el usuario es camionero, valida y actualiza también sus datos en CAMIONERO.
+// (Malena Klein)
 const actualizarUsuario = async (req, res) => {
     // req.params siempre llega como texto, por eso se convierte a número
     const idUsuario = Number(req.params.id);
@@ -109,6 +112,7 @@ const actualizarUsuario = async (req, res) => {
         }
     }
 
+    // El PUT reemplaza estos campos por completo, así que ninguno puede faltar
     for (const campo of CAMPOS_EDITABLES) {
         const valor = req.body[campo];
         if (valor === undefined || valor === null || String(valor).trim() === '') {
@@ -123,12 +127,14 @@ const actualizarUsuario = async (req, res) => {
     }
 
     try {
+        // Confirma que el usuario exista y trae su rol, que es fijo y no viene en el body
         const usuarioExistente = await pool.query('SELECT id_usuario, rol FROM USUARIO WHERE id_usuario = $1', [idUsuario]);
         if (usuarioExistente.rows.length === 0) {
             return res.status(404).json({ message: 'Usuario no encontrado' });
         }
         const rol = usuarioExistente.rows[0].rol;
 
+        // Solo si es camionero se exigen y actualizan los campos de CAMIONERO
         if (rol === 'camionero') {
             for (const campo of CAMPOS_CAMIONERO) {
                 const valor = req.body[campo];
@@ -175,6 +181,7 @@ const actualizarUsuario = async (req, res) => {
 
             await client.query('COMMIT');
 
+            // Agrega el objeto "camionero" a la respuesta solo si aplica
             return res.status(200).json({
                 ...usuarioActualizado,
                 ...(camionero && { camionero }),
@@ -194,10 +201,14 @@ const actualizarUsuario = async (req, res) => {
     }
 };
 
-// GET /usuarios: lista usuarios con filtros opcionales por nombre, dni, rol y estado (todos combinables entre sí)
+// GET /usuarios
+// Devuelve el listado de usuarios, con filtros opcionales por nombre, dni, rol y estado (combinables entre sí).
+// Si el usuario es camionero, suma sus datos de CAMIONERO en la respuesta.
+// (Malena Klein)
 const listarUsuarios = async (req, res) => {
     const { nombre, dni, rol, estado } = req.query;
 
+    // Los filtros son opcionales, pero si vienen tienen que ser valores válidos
     if (rol !== undefined && !ROLES_VALIDOS.includes(String(rol).trim().toLowerCase())) {
         return res.status(400).json({ message: "El filtro 'rol' debe ser 'administrador' o 'camionero'" });
     }
@@ -227,6 +238,7 @@ const listarUsuarios = async (req, res) => {
             [filtroNombre, filtroDni, filtroRol, filtroEstado]
         );
 
+        // Separa las columnas de CAMIONERO en un sub-objeto y las descarta si el usuario es administrador
         const usuarios = resultado.rows.map(fila => {
             const { ubicacion, disponibilidad, tipo_vehiculo, capacidad_kg, ...usuario } = fila;
             const camionero = usuario.rol === 'camionero' ? { ubicacion, disponibilidad, tipo_vehiculo, capacidad_kg } : null;
