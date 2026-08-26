@@ -1,10 +1,30 @@
+/**
+ * Controlador del módulo de Cargas (HU 2.1 + 2.1.1).
+ * Expone el alta de cargas contra la tabla CARGA.
+ */
+
 const pool = require('../db');
 
+/**
+ * Campos que el formulario de alta debe mandar sí o sí.
+ * Se recorren en orden para armar el mapa de errores por campo.
+ */
 const CAMPOS_OBLIGATORIOS = ['origen', 'destino', 'tipo_carga', 'peso', 'fecha', 'observaciones'];
+
+/**
+ * Estado con el que nace toda carga nueva, según la HU.
+ * La transición a "publicada" es responsabilidad de HU 2.3.
+ */
 const ESTADO_INICIAL = 'disponible';
 
-// Valida formato YYYY-MM-DD y ademas que la fecha exista de verdad:
-// el regex solo por si mismo deja pasar cosas como 2026-02-31.
+/**
+ * Valida que la fecha tenga formato AAAA-MM-DD y que además exista de verdad.
+ * El regex por sí solo deja pasar cosas como 2026-02-31, por eso se reconstruye
+ * la fecha y se compara contra el texto original.
+ *
+ * @param {string} valor - fecha recibida en el body, ya recortada.
+ * @returns {boolean} true si la fecha es válida y existe en el calendario.
+ */
 const esFechaValida = (valor) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
     const fecha = new Date(`${valor}T00:00:00Z`);
@@ -12,9 +32,20 @@ const esFechaValida = (valor) => {
     return fecha.toISOString().slice(0, 10) === valor;
 };
 
-// TODO (GIA-39): mientras no exista el middleware de auth, el id del admin llega
-// por el header x-usuario-id. Cuando el middleware este listo, esto se reemplaza
-// por req.usuario.id y toda esta funcion se puede borrar.
+/**
+ * Resuelve qué administrador está creando la carga, y verifica que tenga
+ * permiso para hacerlo: que exista, que su cuenta esté activa y que su rol
+ * sea "administrador".
+ *
+ * TODO (GIA-39): mientras no exista el middleware de auth, el id del admin llega
+ * por el header x-usuario-id. Cuando el middleware esté listo, esto se reemplaza
+ * por req.usuario.id y toda esta función se puede borrar.
+ *
+ * @param {import('express').Request} req - request de Express.
+ * @returns {Promise<{idAdmin?: number, error?: {status: number, message: string}}>}
+ *   `idAdmin` si el usuario puede crear cargas; `error` con el status y el
+ *   mensaje a devolver si no puede.
+ */
 const obtenerAdminCreador = async (req) => {
     const idUsuario = Number(req.header('x-usuario-id'));
     if (!Number.isInteger(idUsuario) || idUsuario <= 0) {
@@ -37,10 +68,25 @@ const obtenerAdminCreador = async (req) => {
     return { idAdmin: usuario.id_usuario };
 };
 
-// POST /cargas: da de alta una carga y la deja en estado "disponible".
-// Devuelve los errores agrupados por campo para que el formulario pueda
-// mostrar cada mensaje debajo del input que corresponde.
+/**
+ * POST /cargas: da de alta una carga y la deja en estado "disponible".
+ *
+ * Valida primero todos los campos y recién después consulta la base, así una
+ * sola respuesta junta todos los errores. Los devuelve agrupados por campo
+ * (`{ message, errores: { campo: mensaje } }`) para que el formulario pueda
+ * mostrar cada mensaje debajo del input que corresponde.
+ *
+ * Respuestas: 201 con la carga creada · 400 si hay campos inválidos ·
+ * 401 si no se identifica al usuario · 403 si no es un administrador activo ·
+ * 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express, con los datos en el body.
+ * @param {import('express').Response} res - response de Express.
+ * @returns {Promise<void>}
+ */
 const crearCarga = async (req, res) => {
+    // Se acumulan todos los errores en vez de cortar en el primero, para que
+    // el formulario pueda marcar de una vez todos los campos con problema.
     const errores = {};
 
     for (const campo of CAMPOS_OBLIGATORIOS) {
@@ -54,6 +100,8 @@ const crearCarga = async (req, res) => {
     const peso = Number(req.body.peso);
     const fecha = String(req.body.fecha ?? '').trim();
 
+    // El "if (!errores.X)" evita pisar el mensaje de "campo obligatorio" con uno
+    // de formato: si el campo vino vacío, ese es el error que hay que mostrar.
     if (!errores.peso) {
         if (Number.isNaN(peso)) {
             errores.peso = "El campo 'peso' debe ser numerico";

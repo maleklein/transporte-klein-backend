@@ -37,16 +37,19 @@ CREATE TABLE CAMIONERO (
     capacidad_kg DECIMAL(10, 2)
 );
 
--- TODO (HU 2.3 / GIA-35): esta tabla es hoy un catalogo de estados, pero la HU pide
+-- TODO (HU 2.3 / GIA-35): esta tabla es hoy un catálogo de estados, pero la HU pide
 -- guardar el historial de transiciones con el usuario responsable y la marca de tiempo.
 -- Para eso necesita ser (id_carga, estado_anterior, estado_nuevo, id_actor, marca_tiempo).
--- La dejamos como esta hasta acordarlo con quien tome GIA-35. Mientras tanto el estado
+-- La dejamos como está hasta acordarlo con quien tome GIA-35. Mientras tanto el estado
 -- vigente de cada carga vive en CARGA.estado_actual.
 CREATE TABLE ESTADO_CARGA (
     id_estado SERIAL PRIMARY KEY,
     descripcion VARCHAR(50) NOT NULL
 );
 
+-- CARGA (HU 2.1 + 2.1.1) — cada solicitud de transporte que registra un administrador.
+-- Los seis primeros campos son los que pide el formulario de alta; el resto es
+-- trazabilidad (quién la creó, en qué estado está, cuándo se tocó por última vez).
 CREATE TABLE CARGA (
     id_carga SERIAL PRIMARY KEY,
     origen VARCHAR(255) NOT NULL,
@@ -55,9 +58,15 @@ CREATE TABLE CARGA (
     peso DECIMAL(10, 2) NOT NULL,
     fecha DATE NOT NULL,
     observaciones TEXT NOT NULL,
+    -- Campo del esquema viejo. No lo pide la HU, así que quedó opcional;
+    -- no lo borramos por si alguien lo estaba usando para otra cosa.
     descripcion TEXT,
+    -- Estado del ciclo de vida. Nace en 'disponible' y HU 2.3 lo pasa a 'publicada'.
     estado_actual VARCHAR(30) NOT NULL DEFAULT 'disponible',
+    -- Administrador responsable del alta. Es NOT NULL a propósito: toda carga
+    -- tiene que poder rastrearse hasta quién la creó.
     id_admin_creador INT NOT NULL REFERENCES USUARIO(id_usuario),
+    -- Camionero asignado. Queda en NULL hasta que la carga se asigne.
     id_camionero INT REFERENCES CAMIONERO(id_camionero),
     creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
