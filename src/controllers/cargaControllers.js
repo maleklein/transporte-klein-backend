@@ -265,4 +265,62 @@ const crearCarga = async (req, res) => {
     }
 };
 
-module.exports = { crearCarga };
+/**
+ * GET /cargas (HU 2.5): lista las cargas registradas, con filtros opcionales y
+ * combinables entre sí vía query string.
+ *
+ * Filtros:
+ * - `estado`: comparación exacta contra `estado_actual`.
+ * - `fecha`: comparación exacta contra la columna DATE (formato AAAA-MM-DD).
+ * - `destino`: coincidencia parcial e insensible a mayúsculas (ILIKE).
+ *
+ * Mismo patrón que `listarUsuarios`: el filtro que no vino se pasa como '' y la
+ * condición `$n = '' OR ...` queda siempre verdadera, así no descarta filas.
+ *
+ * Devuelve los datos que usa el front: los que muestra cada fila del listado más
+ * `observaciones`, que la pantalla de detalle enseña como "Descripción" (HU 2.5
+ * no tiene endpoint propio de detalle: reusa lo que ya trajo el listado). Si
+ * ningún registro matchea, responde 200 con `[]`: el "sin resultados" lo arma el front.
+ *
+ * Respuestas: 200 con el array de cargas · 400 si `fecha` tiene formato inválido ·
+ * 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express. Query params opcionales: estado, fecha, destino.
+ * @param {import('express').Response} res - response de Express.
+ * @returns {Promise<void>}
+ */
+const listarCargas = async (req, res) => {
+    const { estado, fecha, destino } = req.query;
+
+    const filtroFecha = fecha ? String(fecha).trim() : '';
+    if (filtroFecha !== '' && !esFechaValida(filtroFecha)) {
+        return res.status(400).json({ message: "El filtro 'fecha' debe tener formato AAAA-MM-DD" });
+    }
+
+    const filtroEstado = estado ? String(estado).trim() : '';
+    const filtroDestino = destino ? `%${String(destino).trim()}%` : '';
+
+    try {
+        const resultado = await pool.query(
+            `SELECT origen, destino, tipo_carga, peso_kg,
+                    -- Mismo criterio que en el alta: sin TO_CHAR el driver devuelve
+                    -- un Date de JS corrido por la zona horaria local.
+                    TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
+                    observaciones,
+                    estado_actual
+             FROM CARGA
+             WHERE ($1 = '' OR estado_actual = $1)
+               AND ($2 = '' OR fecha = $2::date)
+               AND ($3 = '' OR destino ILIKE $3)
+             ORDER BY fecha, id_carga`,
+            [filtroEstado, filtroFecha, filtroDestino]
+        );
+
+        return res.status(200).json(resultado.rows);
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+};
+
+module.exports = { crearCarga, listarCargas };
