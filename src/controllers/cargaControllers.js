@@ -11,8 +11,8 @@ const pool = require('../db');
  * genérico, sin decirle al usuario qué campo se pasó.
  */
 const CAMPOS_TEXTO = {
-    origen: 255,
-    destino: 255,
+    origen: 150,
+    destino: 150,
     tipo_carga: 100,
     observaciones: 1000,
 };
@@ -36,7 +36,7 @@ const CAMPOS_A_NORMALIZAR = ['origen', 'destino', 'tipo_carga'];
  */
 const ESTADO_INICIAL = 'disponible';
 
-/** Rango que soporta la columna `peso DECIMAL(10, 2)`. */
+/** Rango razonable para la columna `peso_kg` (numeric). */
 const PESO_MINIMO = 0.01;
 const PESO_MAXIMO = 99999999.99;
 
@@ -238,9 +238,9 @@ const crearCarga = async (req, res) => {
         }
 
         const resultado = await pool.query(
-            `INSERT INTO CARGA (origen, destino, tipo_carga, peso, fecha, observaciones, estado_actual, id_admin_creador)
+            `INSERT INTO CARGA (origen, destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING id_carga, origen, destino, tipo_carga, peso,
+             RETURNING id_carga, origen, destino, tipo_carga, peso_kg AS peso,
                        -- Sin el TO_CHAR, el driver convierte el DATE a un Date de JS usando
                        -- la zona horaria local y el front termina recibiendo un timestamp.
                        TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
