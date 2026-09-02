@@ -8,7 +8,8 @@ const CAMPOS_OBLIGATORIOS = ['nombre', 'apellido', 'dni', 'email', 'contraseña'
 const CAMPOS_CAMIONERO = ['ubicacion', 'tipo_vehiculo', 'capacidad_kg'];
 const ROLES_VALIDOS = ['administrador', 'camionero'];
 
-// Usadas por actualizarUsuario (HU 1.2, no incluida en este fragmento).const CAMPOS_EDITABLES = ['nombre', 'apellido', 'email', 'estado'];
+// Usadas por actualizarUsuario (HU 1.2).
+const CAMPOS_EDITABLES = ['nombre', 'apellido', 'email', 'estado'];
 const CAMPOS_BLOQUEADOS = ['dni', 'rol', 'contraseña'];
 const ESTADOS_VALIDOS = ['activo', 'inactivo'];
 
