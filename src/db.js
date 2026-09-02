@@ -1,15 +1,7 @@
+require('dotenv').config();
 const { Pool } = require('pg'); //Herramienta nativa para conectar con PostgreSQL
 
-//Configuramos los datos de nuestra base de datos
-const poolDeConexion = new Pool({
-    user: 'postgres',           
-    host: 'localhost',          
-    database: 'transporte_klein_db', 
-    password: 'SQL4665',
-    port: 5432                  
-require('dotenv').config();
-const { Pool } = require('pg');
-
+//Los datos de conexión salen del .env: nada de credenciales hardcodeadas en el repo.
 const pool = new Pool({
     user: process.env.DB_USER,
     host: process.env.DB_HOST,
@@ -18,5 +10,5 @@ const pool = new Pool({
     port: process.env.DB_PORT,
 });
 
-//Exportamos la conexión para usarla en el controlador
-module.exports = poolDeConexion;
+//Exportamos la conexión para usarla en los controladores y middlewares
+module.exports = pool;
