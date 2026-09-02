@@ -125,42 +125,6 @@ const esFechaValida = (valor) => {
 };
 
 /**
- * Resuelve qué administrador está creando la carga, y verifica que tenga
- * permiso para hacerlo: que exista, que su cuenta esté activa y que su rol
- * sea "administrador".
- *
- * TODO (GIA-39): mientras no exista el middleware de auth, el id del admin llega
- * por el header x-usuario-id. Cuando el middleware esté listo, esto se reemplaza
- * por req.usuario.id y toda esta función se puede borrar.
- *
- * @param {import('express').Request} req - request de Express.
- * @returns {Promise<{idAdmin?: number, error?: {status: number, message: string}}>}
- *   `idAdmin` si el usuario puede crear cargas; `error` con el status y el
- *   mensaje a devolver si no puede.
- */
-const obtenerAdminCreador = async (req) => {
-    const idUsuario = Number(req.header('x-usuario-id'));
-    if (!Number.isInteger(idUsuario) || idUsuario <= 0) {
-        return { error: { status: 401, message: 'Falta identificar al usuario que crea la carga' } };
-    }
-
-    const resultado = await pool.query('SELECT id_usuario, rol, estado FROM USUARIO WHERE id_usuario = $1', [idUsuario]);
-    if (resultado.rows.length === 0) {
-        return { error: { status: 401, message: 'El usuario indicado no existe' } };
-    }
-
-    const usuario = resultado.rows[0];
-    if (usuario.estado !== 'activo') {
-        return { error: { status: 403, message: 'La cuenta no esta activa' } };
-    }
-    if (usuario.rol !== 'administrador') {
-        return { error: { status: 403, message: 'Solo un administrador puede dar de alta cargas' } };
-    }
-
-    return { idAdmin: usuario.id_usuario };
-};
-
-/**
  * POST /cargas: da de alta una carga y la deja en estado "disponible".
  *
  * Valida primero todos los campos y recién después consulta la base, así una
@@ -168,9 +132,13 @@ const obtenerAdminCreador = async (req) => {
  * (`{ message, errores: { campo: mensaje } }`) para que el formulario pueda
  * mostrar cada mensaje debajo del input que corresponde.
  *
+ * El administrador que queda como creador sale de `req.usuario`, que deja el
+ * middleware `verifyToken`. La ruta ya exige rol de administrador, así que acá
+ * no hace falta volver a chequearlo.
+ *
  * Respuestas: 201 con la carga creada · 400 si hay campos inválidos ·
- * 401 si no se identifica al usuario · 403 si no es un administrador activo ·
- * 500 ante un error inesperado.
+ * 500 ante un error inesperado. El 401 (sin token) y el 403 (rol o cuenta
+ * inactiva) los resuelven los middlewares antes de llegar acá.
  *
  * @param {import('express').Request} req - request de Express, con los datos en el body.
  * @param {import('express').Response} res - response de Express.
@@ -232,11 +200,6 @@ const crearCarga = async (req, res) => {
     }
 
     try {
-        const { idAdmin, error } = await obtenerAdminCreador(req);
-        if (error) {
-            return res.status(error.status).json({ message: error.message });
-        }
-
         const resultado = await pool.query(
             `INSERT INTO CARGA (origen, destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -254,7 +217,7 @@ const crearCarga = async (req, res) => {
                 fecha,
                 textos.observaciones,
                 ESTADO_INICIAL,
-                idAdmin,
+                req.usuario.id,
             ]
         );
 
