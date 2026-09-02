@@ -6,17 +6,24 @@ const usuarioControllers = require('./src/controllers/usuarioControllers');
 const cargaControllers = require('./src/controllers/cargaControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
-const app = express();
+//Importo a la función desde el controlador
+const { iniciarSesion } = require('./src/controllers/authControllers');
 
-// Middlewares
-app.use(cors());
-app.use(express.json());
+const servidor = express();
+const puerto = 3000;
 
-// Prueba de conexión a la base de datos
-pool.connect()
-    .then(() => console.log('¡Conectado exitosamente a la base de datos!'))
-    .catch(err => console.error('Error de conexión a la base de datos', err.stack));
+//Middlewares (Configuraciones base)
+servidor.use(cors()); //Permite que el Frontend se comunique sin bloqueos
+servidor.use(express.json()); // MUY IMPORTANTE: Permite que el servidor lea datos en formato JSON (el correo y la clave)
 
+// -- Rutas del sistema --
+// Tradujo la ruta al español. El frontend deberá apuntar aquí.!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+servidor.post('/autenticacion/iniciar-sesion', iniciarSesion);
+
+// Iniciar el servidor 
+servidor.listen(puerto, () => {
+    console.log(`Servidor de Transporte Klein corriendo perfectamente en el puerto ${puerto}`);
+});
 // Rutas publicas
 app.post('/auth/login', authControllers.login);
 
