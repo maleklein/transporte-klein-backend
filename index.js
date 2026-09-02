@@ -23,6 +23,7 @@ app.post('/usuarios', usuarioControllers.crearUsuario);
 app.put('/usuarios/:id', usuarioControllers.actualizarUsuario);
 app.post('/cargas', cargaControllers.crearCarga);
 app.get('/cargas', cargaControllers.listarCargas);
+app.get('/cargas/:id', cargaControllers.obtenerCarga);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;

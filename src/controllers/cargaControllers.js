@@ -266,7 +266,7 @@ const crearCarga = async (req, res) => {
 };
 
 /**
- * GET /cargas (HU 2.5): lista las cargas registradas, con filtros opcionales y
+ * GET /cargas (HU 2.5 - GIANNA): lista las cargas registradas, con filtros opcionales y
  * combinables entre sí vía query string.
  *
  * Filtros:
@@ -302,7 +302,7 @@ const listarCargas = async (req, res) => {
 
     try {
         const resultado = await pool.query(
-            `SELECT origen, destino, tipo_carga, peso_kg,
+            `SELECT id_carga, origen, destino, tipo_carga, peso_kg,
                     -- Mismo criterio que en el alta: sin TO_CHAR el driver devuelve
                     -- un Date de JS corrido por la zona horaria local.
                     TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
@@ -323,4 +323,47 @@ const listarCargas = async (req, res) => {
     }
 };
 
-module.exports = { crearCarga, listarCargas };
+/**
+ * GET /cargas/:id (HU 2.5 - deuda técnica): devuelve una carga puntual con los
+ * mismos campos que trae el listado, para que la pantalla de detalle se pueda
+ * abrir por URL directa y sobrevivir a un F5 sin depender del router state.
+ *
+ * Respuestas: 200 con la carga · 400 si `id` no es numérico ·
+ * 404 si no existe una carga con ese id · 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express. Params: id.
+ * @param {import('express').Response} res - response de Express.
+ * @returns {Promise<void>}
+ */
+const obtenerCarga = async (req, res) => {
+    // req.params siempre llega como texto, por eso se convierte a número.
+    const idCarga = Number(req.params.id);
+    if (!Number.isInteger(idCarga) || idCarga <= 0) {
+        return res.status(400).json({ message: "El parámetro 'id' debe ser numérico" });
+    }
+
+    try {
+        const resultado = await pool.query(
+            `SELECT id_carga, origen, destino, tipo_carga, peso_kg,
+                    -- Mismo criterio que en el listado: sin TO_CHAR el driver devuelve
+                    -- un Date de JS corrido por la zona horaria local.
+                    TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
+                    observaciones,
+                    estado_actual
+             FROM CARGA
+             WHERE id_carga = $1`,
+            [idCarga]
+        );
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
+        }
+
+        return res.status(200).json(resultado.rows[0]);
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+};
+
+module.exports = { crearCarga, listarCargas, obtenerCarga };
