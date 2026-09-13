@@ -85,8 +85,9 @@ CREATE TABLE ESTADO_CARGA (
     -- Queda en NULL en el primer registro: antes del alta no había estado.
     estado_anterior VARCHAR(30),
     estado_nuevo VARCHAR(30) NOT NULL,
-    -- Usuario responsable del cambio.
-    id_actor INTEGER NOT NULL REFERENCES USUARIO(id_usuario),
+    -- Usuario responsable del cambio. NULL cuando el cambio lo hace el
+    -- sistema (proceso automático) y no una persona.
+    id_actor INTEGER REFERENCES USUARIO(id_usuario),
     marca_tiempo TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -31,6 +31,7 @@ app.put('/usuarios/:id', verifyToken, requireRol('administrador'), usuarioContro
 app.post('/cargas', verifyToken, requireRol('administrador'), cargaControllers.crearCarga);
 app.get('/cargas', verifyToken, cargaControllers.listarCargas);
 app.get('/cargas/:id', verifyToken, cargaControllers.obtenerCarga);
+app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialCarga);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
