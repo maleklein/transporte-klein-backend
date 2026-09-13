@@ -329,4 +329,49 @@ const obtenerCarga = async (req, res) => {
     }
 };
 
-module.exports = { crearCarga, listarCargas, obtenerCarga };
+/**
+ * GET /cargas/:id/historial (HU 8): devuelve la bitácora de cambios de estado
+ * de una carga, ordenada del más antiguo al más reciente.
+ *
+ * Trae nombre y apellido del actor con un JOIN a USUARIO. Cuando `id_actor`
+ * es NULL (cambio hecho por el sistema, no por una persona) se devuelve el
+ * texto "Sistema" en vez de nombre/apellido.
+ *
+ * Respuestas: 200 con el array de la bitácora (puede ser vacío si la carga no
+ * existe, igual que `listarCargas`) · 400 si `id` no es numérico ·
+ * 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express. Params: id.
+ * @param {import('express').Response} res - response de Express.
+ * @returns {Promise<void>}
+ */
+const obtenerHistorialCarga = async (req, res) => {
+    const idCarga = Number(req.params.id);
+    if (!Number.isInteger(idCarga) || idCarga <= 0) {
+        return res.status(400).json({ message: "El parámetro 'id' debe ser numérico" });
+    }
+
+    try {
+        const resultado = await pool.query(
+            `SELECT ec.id_estado_carga, ec.id_carga, ec.estado_anterior, ec.estado_nuevo,
+                    ec.id_actor,
+                    CASE
+                        WHEN ec.id_actor IS NULL THEN 'Sistema'
+                        ELSE u.nombre || ' ' || u.apellido
+                    END AS actor,
+                    ec.marca_tiempo
+             FROM ESTADO_CARGA ec
+             LEFT JOIN USUARIO u ON u.id_usuario = ec.id_actor
+             WHERE ec.id_carga = $1
+             ORDER BY ec.marca_tiempo ASC`,
+            [idCarga]
+        );
+
+        return res.status(200).json(resultado.rows);
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+};
+
+module.exports = { crearCarga, listarCargas, obtenerCarga, obtenerHistorialCarga };
