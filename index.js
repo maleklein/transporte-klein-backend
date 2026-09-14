@@ -6,6 +6,9 @@ const authControllers = require('./src/controllers/authControllers');
 const usuarioControllers = require('./src/controllers/usuarioControllers');
 const cargaControllers = require('./src/controllers/cargaControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
+const postulacionControllers = require('./src/controllers/postulacionControllers');
+
+
 
 const app = express();
 
@@ -32,7 +35,8 @@ app.post('/cargas', verifyToken, requireRol('administrador'), cargaControllers.c
 app.get('/cargas', verifyToken, cargaControllers.listarCargas);
 app.get('/cargas/:id', verifyToken, cargaControllers.obtenerCarga);
 app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialCarga);
-
+// Postulaciones (HU 4)
+app.post('/cargas/:id/postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.crearPostulacion);
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
