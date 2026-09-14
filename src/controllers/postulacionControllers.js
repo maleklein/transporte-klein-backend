@@ -57,4 +57,28 @@ const crearPostulacion = async (req, res) => {
     }
 };
 
-module.exports = { crearPostulacion };
+
+/**
+ * GET /postulaciones/mis-postulaciones: trae el historial de postulaciones del camionero logueado.
+ */
+const obtenerMisPostulaciones = async (req, res) => {
+    const idCamionero = req.usuario.id;
+
+    try {
+        const result = await pool.query(
+            `SELECT p.id_postulacion, p.estado, p.fecha_postulacion,
+                    c.id_carga, c.origen, c.destino, c.tipo_carga, c.fecha as fecha_retiro
+             FROM POSTULACION p
+             JOIN CARGA c ON p.id_carga = c.id_carga
+             WHERE p.id_camionero = $1
+             ORDER BY p.fecha_postulacion DESC`,
+            [idCamionero]
+        );
+        return res.status(200).json(result.rows);
+    } catch (error) {
+        console.error('Error al obtener mis postulaciones:', error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+};
+
+module.exports = { crearPostulacion, obtenerMisPostulaciones };

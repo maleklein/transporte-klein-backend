@@ -37,6 +37,7 @@ app.get('/cargas/:id', verifyToken, cargaControllers.obtenerCarga);
 app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialCarga);
 // Postulaciones (HU 4)
 app.post('/cargas/:id/postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.crearPostulacion);
+app.get('/postulaciones/mis-postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.obtenerMisPostulaciones);
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
