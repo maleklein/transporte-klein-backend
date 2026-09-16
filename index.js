@@ -32,6 +32,7 @@ app.post('/cargas', verifyToken, requireRol('administrador'), cargaControllers.c
 app.get('/cargas', verifyToken, cargaControllers.listarCargas);
 app.get('/cargas/:id', verifyToken, cargaControllers.obtenerCarga);
 app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialCarga);
+app.put('/cargas/:id', verifyToken, requireRol('administrador'), cargaControllers.actualizarCarga);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
