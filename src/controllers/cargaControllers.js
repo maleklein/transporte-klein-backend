@@ -280,9 +280,12 @@ const obtenerHistorialCarga = async (req, res) => {
  * parcial: hay que volver a mandar los seis campos, igual que en
  * `actualizarUsuario`.
  *
- * Bloquea la edición si la carga ya está 'en_viaje' o 'entregada': a partir
- * de ahí sus datos son el registro de lo que pasó, no un borrador. No toca
- * `estado_actual` ni recalcula kilómetros al cambiar origen/destino (HU 9).
+ * Bloquea la edición si la carga está 'en_viaje' o 'entregada', pero por
+ * motivos distintos: en viaje es un bloqueo mientras dure ese estado, y si
+ * hace falta corregir algo se la puede volver a 'aceptada' (HU 7); entregada
+ * es definitivo, porque es un estado final del que ya no se vuelve (RN-01).
+ * No toca `estado_actual` ni recalcula kilómetros al cambiar origen/destino
+ * (HU 9).
  *
  * Respuestas: 200 con la carga actualizada · 400 si `id` no es numérico o hay
  * campos inválidos · 404 si no existe una carga con ese id · 409 si la carga
@@ -320,8 +323,15 @@ const actualizarCarga = async (req, res) => {
 
         const estadoActual = cargaExistente.rows[0].estado_actual;
         if (ESTADOS_BLOQUEADOS_EDICION.includes(estadoActual)) {
+            // Los dos casos no son lo mismo: el de "en viaje" se puede
+            // destrabar volviendo la carga a "aceptada", y conviene decírselo
+            // a quien intentó editarla en vez de dejarlo en un callejón.
+            const motivo = estadoActual === ESTADOS.EN_VIAJE
+                ? "Mientras está en viaje no se pueden modificar sus datos. Si necesitás corregir algo, volvé a pasarla a 'aceptada' primero."
+                : 'La carga ya fue entregada: sus datos quedan como registro de lo que pasó.';
+
             return res.status(409).json({
-                message: `No se puede editar una carga en estado '${estadoActual}': una vez en viaje o entregada, sus datos quedan como registro de lo que pasó.`,
+                message: `No se puede editar una carga en estado '${estadoActual}'. ${motivo}`,
             });
         }
 
