@@ -1,34 +1,10 @@
 /**
- * Controlador del módulo de Cargas (HU 2.1 + 2.1.1).
- * Expone el alta de cargas contra la tabla CARGA.
+ * Controlador del módulo de Cargas (HU 2.1 + 2.1.1 + 2.2).
+ * Expone el alta y la edición de cargas contra la tabla CARGA.
  */
 
 const pool = require('../db');
-
-/**
- * Campos de texto del formulario, con el largo máximo que soporta su columna.
- * Validarlos acá evita que el INSERT falle en Postgres y termine en un 500
- * genérico, sin decirle al usuario qué campo se pasó.
- */
-const CAMPOS_TEXTO = {
-    origen: 150,
-    destino: 150,
-    tipo_carga: 100,
-    observaciones: 1000,
-};
-
-/**
- * Campos que el formulario de alta debe mandar sí o sí.
- * Se recorren en orden para armar el mapa de errores por campo.
- */
-const CAMPOS_OBLIGATORIOS = [...Object.keys(CAMPOS_TEXTO), 'peso', 'fecha'];
-
-/**
- * Campos cuyo texto se normaliza con la primera letra en mayúscula, para que
- * "rosario" y "Rosario" no queden como dos destinos distintos en el listado.
- * `observaciones` queda afuera: es texto libre y no se usa para agrupar.
- */
-const CAMPOS_A_NORMALIZAR = ['origen', 'destino', 'tipo_carga'];
+const { validarCampos, esFechaValida } = require('../validators/carga');
 
 /**
  * Estado con el que nace toda carga nueva, según la HU.
@@ -36,93 +12,12 @@ const CAMPOS_A_NORMALIZAR = ['origen', 'destino', 'tipo_carga'];
  */
 const ESTADO_INICIAL = 'disponible';
 
-/** Rango razonable para la columna `peso_kg` (numeric). */
-const PESO_MINIMO = 0.01;
-const PESO_MAXIMO = 99999999.99;
-
-/** Años aceptados. Fuera de este rango, Postgres rechaza el DATE con un 500. */
-const ANIO_MINIMO = 1900;
-const ANIO_MAXIMO = 2100;
-
 /**
- * Saca los caracteres que no se ven pero rompen cosas: de control (saltos de
- * línea, tabulaciones, el byte nulo que Postgres rechaza) y los invisibles de
- * ancho cero o de dirección, que hacen que dos textos se vean iguales en
- * pantalla y no lo sean a la hora de filtrar.
- *
- * Se limpian en silencio en vez de rechazarlos: casi siempre llegan pegados
- * desde un Excel o un PDF y el usuario no tiene forma de saber que están.
- *
- * @param {string} valor - texto recibido en el body.
- * @returns {string} el texto sin caracteres invisibles y sin espacios sobrantes.
+ * Estados desde los que ya no se puede editar una carga (HU 2.2): una vez que
+ * está en viaje o fue entregada, sus datos pasan a ser el registro de lo que
+ * efectivamente pasó, no un borrador que se pueda seguir corrigiendo.
  */
-const limpiarTexto = (valor) => valor
-    // Caracteres de control C0 y C1, incluido el byte nulo que Postgres rechaza de plano.
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ')
-    // Invisibles: ancho cero, marcas de direccion (bidi) y BOM.
-    .replace(/[\u200B-\u200F\u202A-\u202E\uFEFF]/g, '')
-    // Los espacios que quedaron, mas los que ya venian de mas, se juntan en uno solo.
-    .replace(/\s+/g, ' ')
-    .trim();
-
-/**
- * Pone en mayúscula la primera letra y deja el resto como lo escribió el usuario.
- * No se toca el resto a propósito: pasar todo a minúscula rompería nombres como
- * "Buenos Aires" o "Km 45".
- *
- * @param {string} valor - texto ya limpio.
- * @returns {string} el texto con la primera letra en mayúscula.
- */
-const normalizar = (valor) => (valor ? valor[0].toUpperCase() + valor.slice(1) : valor);
-
-/**
- * Interpreta el peso, que puede llegar como número o como texto.
- * Acepta la coma decimal porque es como se escribe acá ("12,5"), y descarta
- * lo que la columna no puede guardar: valores no numéricos, infinitos, fuera
- * de rango, o tan chicos que al redondear a dos decimales quedarían en cero.
- *
- * @param {*} valor - lo que vino en `body.peso`.
- * @returns {{peso?: number, error?: string}} el peso normalizado, o el mensaje de error.
- */
-const parsearPeso = (valor) => {
-    if (typeof valor !== 'number' && typeof valor !== 'string') {
-        return { error: "El campo 'peso' debe ser un número" };
-    }
-
-    const numero = typeof valor === 'number' ? valor : Number(String(valor).replace(',', '.').trim());
-
-    if (!Number.isFinite(numero)) {
-        return { error: "El campo 'peso' debe ser un número" };
-    }
-    if (numero < PESO_MINIMO) {
-        return { error: `El campo 'peso' debe ser al menos ${PESO_MINIMO} kg` };
-    }
-    if (numero > PESO_MAXIMO) {
-        return { error: `El campo 'peso' no puede superar los ${PESO_MAXIMO} kg` };
-    }
-
-    return { peso: numero };
-};
-
-/**
- * Valida que la fecha tenga formato AAAA-MM-DD, que exista de verdad y que caiga
- * en un año razonable. El regex por sí solo deja pasar cosas como 2026-02-31,
- * por eso se reconstruye la fecha y se compara contra el texto original.
- *
- * @param {string} valor - fecha recibida en el body, ya recortada.
- * @returns {boolean} true si la fecha es válida y existe en el calendario.
- */
-const esFechaValida = (valor) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
-
-    const anio = Number(valor.slice(0, 4));
-    if (anio < ANIO_MINIMO || anio > ANIO_MAXIMO) return false;
-
-    const fecha = new Date(`${valor}T00:00:00Z`);
-    if (Number.isNaN(fecha.getTime())) return false;
-    return fecha.toISOString().slice(0, 10) === valor;
-};
+const ESTADOS_BLOQUEADOS_EDICION = ['en_viaje', 'entregada'];
 
 /**
  * POST /cargas: da de alta una carga y la deja en estado "disponible".
@@ -145,52 +40,7 @@ const esFechaValida = (valor) => {
  * @returns {Promise<void>}
  */
 const crearCarga = async (req, res) => {
-    // Se acumulan todos los errores en vez de cortar en el primero, para que
-    // el formulario pueda marcar de una vez todos los campos con problema.
-    const errores = {};
-    const textos = {};
-
-    for (const [campo, largoMaximo] of Object.entries(CAMPOS_TEXTO)) {
-        const valor = req.body[campo];
-
-        // Se exige texto de verdad: si viniera un objeto o un array, el String()
-        // lo guardaría como "[object Object]" o "a,b" sin que nadie se entere.
-        if (typeof valor !== 'string') {
-            errores[campo] = valor === undefined || valor === null
-                ? `El campo '${campo}' es obligatorio`
-                : `El campo '${campo}' debe ser texto`;
-            continue;
-        }
-
-        const limpio = limpiarTexto(valor);
-
-        if (limpio === '') {
-            errores[campo] = `El campo '${campo}' es obligatorio`;
-        } else if (limpio.length > largoMaximo) {
-            errores[campo] = `El campo '${campo}' no puede superar los ${largoMaximo} caracteres`;
-        } else {
-            textos[campo] = CAMPOS_A_NORMALIZAR.includes(campo) ? normalizar(limpio) : limpio;
-        }
-    }
-
-    if (req.body.peso === undefined || req.body.peso === null || String(req.body.peso).trim() === '') {
-        errores.peso = "El campo 'peso' es obligatorio";
-    } else {
-        const { peso: pesoValido, error } = parsearPeso(req.body.peso);
-        if (error) {
-            errores.peso = error;
-        } else {
-            textos.peso = pesoValido;
-        }
-    }
-
-    const fecha = typeof req.body.fecha === 'string' ? req.body.fecha.trim() : '';
-
-    if (fecha === '') {
-        errores.fecha = "El campo 'fecha' es obligatorio";
-    } else if (!esFechaValida(fecha)) {
-        errores.fecha = "El campo 'fecha' debe tener formato AAAA-MM-DD";
-    }
+    const { errores, valores } = validarCampos(req.body);
 
     if (Object.keys(errores).length > 0) {
         return res.status(400).json({
@@ -208,14 +58,14 @@ const crearCarga = async (req, res) => {
                        -- la zona horaria local y el front termina recibiendo un timestamp.
                        TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
                        observaciones, estado_actual, id_admin_creador, creado_en, actualizado_en`,
-            // Los textos ya vienen limpios y normalizados de la validación de arriba.
+            // Los valores ya vienen limpios y normalizados de validarCampos.
             [
-                textos.origen,
-                textos.destino,
-                textos.tipo_carga,
-                textos.peso,
-                fecha,
-                textos.observaciones,
+                valores.origen,
+                valores.destino,
+                valores.tipo_carga,
+                valores.peso,
+                valores.fecha,
+                valores.observaciones,
                 ESTADO_INICIAL,
                 req.usuario.id,
             ]
@@ -374,4 +224,85 @@ const obtenerHistorialCarga = async (req, res) => {
     }
 };
 
-module.exports = { crearCarga, listarCargas, obtenerCarga, obtenerHistorialCarga };
+/**
+ * PUT /cargas/:id (HU 2.2): edita los seis campos de una carga existente
+ * (origen, destino, tipo_carga, peso, fecha, observaciones).
+ *
+ * Usa las mismas validaciones que el alta (`validarCampos`), así que un campo
+ * inválido da exactamente el mismo error que en `crearCarga`. No admite carga
+ * parcial: hay que volver a mandar los seis campos, igual que en
+ * `actualizarUsuario`.
+ *
+ * Bloquea la edición si la carga ya está 'en_viaje' o 'entregada': a partir
+ * de ahí sus datos son el registro de lo que pasó, no un borrador. No toca
+ * `estado_actual` ni recalcula kilómetros al cambiar origen/destino (HU 9).
+ *
+ * Respuestas: 200 con la carga actualizada · 400 si `id` no es numérico o hay
+ * campos inválidos · 404 si no existe una carga con ese id · 409 si la carga
+ * está en un estado que ya no admite edición · 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express. Params: id. Body: los seis campos de la carga.
+ * @param {import('express').Response} res - response de Express.
+ * @returns {Promise<void>}
+ */
+const actualizarCarga = async (req, res) => {
+    const idCarga = Number(req.params.id);
+    if (!Number.isInteger(idCarga) || idCarga <= 0) {
+        return res.status(400).json({ message: "El parámetro 'id' debe ser numérico" });
+    }
+
+    const { errores, valores } = validarCampos(req.body);
+    if (Object.keys(errores).length > 0) {
+        return res.status(400).json({
+            message: 'Hay campos con errores',
+            errores,
+        });
+    }
+
+    try {
+        // Se busca la carga primero para poder distinguir el 404 (no existe) del
+        // 409 (existe pero su estado ya no admite edición).
+        const cargaExistente = await pool.query(
+            'SELECT id_carga, estado_actual FROM CARGA WHERE id_carga = $1',
+            [idCarga]
+        );
+
+        if (cargaExistente.rows.length === 0) {
+            return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
+        }
+
+        const estadoActual = cargaExistente.rows[0].estado_actual;
+        if (ESTADOS_BLOQUEADOS_EDICION.includes(estadoActual)) {
+            return res.status(409).json({
+                message: `No se puede editar una carga en estado '${estadoActual}': una vez en viaje o entregada, sus datos quedan como registro de lo que pasó.`,
+            });
+        }
+
+        const resultado = await pool.query(
+            `UPDATE CARGA
+             SET origen = $1, destino = $2, tipo_carga = $3, peso_kg = $4, fecha = $5, observaciones = $6
+             WHERE id_carga = $7
+             RETURNING id_carga, origen, destino, tipo_carga, peso_kg AS peso,
+                       -- Mismo criterio que en el alta: sin TO_CHAR el driver devuelve
+                       -- un Date de JS corrido por la zona horaria local.
+                       TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
+                       observaciones, estado_actual, id_admin_creador, creado_en, actualizado_en`,
+            [
+                valores.origen,
+                valores.destino,
+                valores.tipo_carga,
+                valores.peso,
+                valores.fecha,
+                valores.observaciones,
+                idCarga,
+            ]
+        );
+
+        return res.status(200).json(resultado.rows[0]);
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+};
+
+module.exports = { crearCarga, listarCargas, obtenerCarga, obtenerHistorialCarga, actualizarCarga };
