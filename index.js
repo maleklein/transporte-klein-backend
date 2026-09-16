@@ -24,15 +24,16 @@ app.post('/usuarios', verifyToken, requireRol('administrador'), usuarioControlle
 app.put('/usuarios/:id', verifyToken, requireRol('administrador'), usuarioControllers.actualizarUsuario);
 
 // Rutas de cargas.
-// Dar de alta es exclusivo del administrador (HU 2.1). Consultar queda abierto a
-// cualquier usuario logueado, porque HU 2.3 pide que las cargas publicadas sean
-// visibles para los camioneros; si el equipo prefiere restringirlo, alcanza con
-// agregarle requireRol('administrador') a las dos rutas de abajo.
+// Escribir (alta, edición, cambio de estado) es exclusivo del administrador.
+// Consultar queda abierto a cualquier usuario logueado, pero lo que ve depende
+// del rol: al camionero el controlador le devuelve sólo las cargas en
+// "disponible" (HU 3), que son a las que se puede postular.
 app.post('/cargas', verifyToken, requireRol('administrador'), cargaControllers.crearCarga);
 app.get('/cargas', verifyToken, cargaControllers.listarCargas);
 app.get('/cargas/:id', verifyToken, cargaControllers.obtenerCarga);
 app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialCarga);
 app.put('/cargas/:id', verifyToken, requireRol('administrador'), cargaControllers.actualizarCarga);
+app.patch('/cargas/:id/estado', verifyToken, requireRol('administrador'), cargaControllers.cambiarEstadoCarga);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;

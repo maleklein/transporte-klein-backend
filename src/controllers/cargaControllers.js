@@ -1,16 +1,21 @@
 /**
- * Controlador del módulo de Cargas (HU 2.1 + 2.1.1 + 2.2).
- * Expone el alta y la edición de cargas contra la tabla CARGA.
+ * Controlador del módulo de Cargas (HU 2.1 + 2.1.1 + 2.2 + 3 + 7 + 8).
+ * Expone el alta, la edición, la consulta y el cambio de estado de las cargas.
  */
 
 const pool = require('../db');
 const { validarCampos, esFechaValida } = require('../validators/carga');
+const { registrarCambioEstado } = require('../services/registrarCambioEstado');
+const {
+    ESTADOS,
+    ESTADOS_VALIDOS,
+    esEstadoValido,
+    transicionesDesde,
+    puedeTransicionar,
+} = require('../domain/estadosCarga');
 
-/**
- * Estado con el que nace toda carga nueva, según la HU.
- * La transición a "publicada" es responsabilidad de HU 2.3.
- */
-const ESTADO_INICIAL = 'disponible';
+/** Estado con el que nace toda carga nueva (HU 2.1.1). */
+const ESTADO_INICIAL = ESTADOS.DISPONIBLE;
 
 /**
  * Estados desde los que ya no se puede editar una carga (HU 2.2): una vez que
@@ -49,8 +54,15 @@ const crearCarga = async (req, res) => {
         });
     }
 
+    // Transacción porque el alta son dos escrituras: la carga y su primer
+    // registro en la bitácora. Si la segunda fallara, la carga no puede quedar
+    // sin el asiento que dice quién la creó y cuándo.
+    const client = await pool.connect();
+
     try {
-        const resultado = await pool.query(
+        await client.query('BEGIN');
+
+        const resultado = await client.query(
             `INSERT INTO CARGA (origen, destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING id_carga, origen, destino, tipo_carga, peso_kg AS peso,
@@ -71,10 +83,27 @@ const crearCarga = async (req, res) => {
             ]
         );
 
-        return res.status(201).json(resultado.rows[0]);
+        const cargaCreada = resultado.rows[0];
+
+        // Primer asiento de la bitácora (HU 8): el estado anterior es null
+        // porque antes del alta la carga no existía.
+        await registrarCambioEstado(
+            cargaCreada.id_carga,
+            null,
+            ESTADO_INICIAL,
+            req.usuario.id,
+            client
+        );
+
+        await client.query('COMMIT');
+
+        return res.status(201).json(cargaCreada);
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error(error);
         return res.status(500).json({ message: 'Error interno del servidor' });
+    } finally {
+        client.release();
     }
 };
 
@@ -110,8 +139,17 @@ const listarCargas = async (req, res) => {
         return res.status(400).json({ message: "El filtro 'fecha' debe tener formato AAAA-MM-DD" });
     }
 
-    const filtroEstado = estado ? String(estado).trim() : '';
+    let filtroEstado = estado ? String(estado).trim() : '';
     const filtroDestino = destino ? `%${String(destino).trim()}%` : '';
+
+    // HU 3: al camionero sólo se le muestran las cargas en "disponible", que son
+    // a las que se puede postular. El filtro de estado que mande se ignora a
+    // propósito — no es un capricho de la interfaz, es la regla del negocio, y
+    // si dependiera del query param alcanzaría con editar la URL para ver todo.
+    const esCamionero = req.usuario?.rol === 'camionero';
+    if (esCamionero) {
+        filtroEstado = ESTADOS.DISPONIBLE;
+    }
 
     try {
         const resultado = await pool.query(
@@ -172,7 +210,16 @@ const obtenerCarga = async (req, res) => {
             return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
         }
 
-        return res.status(200).json(resultado.rows[0]);
+        const carga = resultado.rows[0];
+
+        // Misma regla que en el listado (HU 3): si al camionero no se le muestra
+        // una carga que no está disponible, tampoco puede abrirla escribiendo la
+        // URL a mano. Se responde 404 y no 403 para no confirmarle que existe.
+        if (req.usuario?.rol === 'camionero' && carga.estado_actual !== ESTADOS.DISPONIBLE) {
+            return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
+        }
+
+        return res.status(200).json(carga);
     } catch (error) {
         console.error(error);
         return res.status(500).json({ message: 'Error interno del servidor' });
@@ -305,4 +352,111 @@ const actualizarCarga = async (req, res) => {
     }
 };
 
-module.exports = { crearCarga, listarCargas, obtenerCarga, obtenerHistorialCarga, actualizarCarga };
+/**
+ * PATCH /cargas/:id/estado (HU 7): mueve una carga a otro estado.
+ *
+ * Valida que la transición esté permitida por la máquina de estados antes de
+ * tocar nada, y deja el cambio asentado en la bitácora de ESTADO_CARGA (HU 8)
+ * con el administrador responsable y la marca de tiempo.
+ *
+ * El UPDATE de la carga y el INSERT en la bitácora van en una transacción: si
+ * fallara el segundo, no puede quedar una carga que cambió de estado sin el
+ * registro de quién la cambió, que es justamente lo que la bitácora garantiza.
+ *
+ * Respuestas: 200 con la carga actualizada · 400 si el id o el estado pedido
+ * no son válidos · 404 si no existe la carga · 409 si la transición no está
+ * permitida · 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express. Body: `{ estado }`.
+ * @param {import('express').Response} res - response de Express.
+ * @returns {Promise<void>}
+ */
+const cambiarEstadoCarga = async (req, res) => {
+    const idCarga = Number(req.params.id);
+    if (!Number.isInteger(idCarga) || idCarga <= 0) {
+        return res.status(400).json({ message: "El parámetro 'id' debe ser numérico" });
+    }
+
+    const estadoNuevo = typeof req.body?.estado === 'string' ? req.body.estado.trim() : '';
+
+    if (!estadoNuevo) {
+        return res.status(400).json({ message: "El campo 'estado' es obligatorio" });
+    }
+    if (!esEstadoValido(estadoNuevo)) {
+        return res.status(400).json({
+            message: `'${estadoNuevo}' no es un estado válido. Los estados posibles son: ${ESTADOS_VALIDOS.join(', ')}.`,
+        });
+    }
+
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // FOR UPDATE bloquea la fila hasta el commit: si dos administradores
+        // cambian el estado a la vez, el segundo lee el estado ya actualizado
+        // y su transición se valida contra el valor real, no contra uno viejo.
+        const cargaExistente = await client.query(
+            'SELECT id_carga, estado_actual FROM CARGA WHERE id_carga = $1 FOR UPDATE',
+            [idCarga]
+        );
+
+        if (cargaExistente.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
+        }
+
+        const estadoActual = cargaExistente.rows[0].estado_actual;
+
+        if (estadoActual === estadoNuevo) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                message: `La carga ya está en estado '${estadoActual}'.`,
+            });
+        }
+
+        if (!puedeTransicionar(estadoActual, estadoNuevo)) {
+            await client.query('ROLLBACK');
+
+            const posibles = transicionesDesde(estadoActual);
+            const detalle = posibles.length > 0
+                ? `Desde '${estadoActual}' sólo se puede pasar a: ${posibles.join(', ')}.`
+                : `'${estadoActual}' es un estado final: la carga ya no puede cambiar de estado.`;
+
+            return res.status(409).json({
+                message: `No se puede pasar de '${estadoActual}' a '${estadoNuevo}'. ${detalle}`,
+            });
+        }
+
+        const resultado = await client.query(
+            `UPDATE CARGA
+             SET estado_actual = $1
+             WHERE id_carga = $2
+             RETURNING id_carga, origen, destino, tipo_carga, peso_kg AS peso,
+                       TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
+                       observaciones, estado_actual, id_admin_creador, creado_en, actualizado_en`,
+            [estadoNuevo, idCarga]
+        );
+
+        await registrarCambioEstado(idCarga, estadoActual, estadoNuevo, req.usuario.id, client);
+
+        await client.query('COMMIT');
+
+        return res.status(200).json(resultado.rows[0]);
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error(error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    } finally {
+        client.release();
+    }
+};
+
+module.exports = {
+    crearCarga,
+    listarCargas,
+    obtenerCarga,
+    obtenerHistorialCarga,
+    actualizarCarga,
+    cambiarEstadoCarga,
+};

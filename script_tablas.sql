@@ -115,3 +115,23 @@ CREATE TRIGGER trigger_carga_actualizado_en
 BEFORE UPDATE ON CARGA
 FOR EACH ROW
 EXECUTE FUNCTION actualizar_timestamp();
+
+
+-- ============================================================
+-- Índices para las consultas filtradas del listado de cargas (HU 3).
+-- El listado filtra por estado, fecha y destino, y ordena por fecha.
+-- Sin índices Postgres recorre la tabla entera en cada búsqueda.
+-- ============================================================
+
+-- El camionero siempre consulta por estado 'disponible', y el administrador
+-- filtra por estado y ordena por fecha: este índice cubre los dos casos.
+CREATE INDEX idx_carga_estado_fecha ON CARGA (estado_actual, fecha);
+
+-- El filtro por destino usa ILIKE '%texto%', que un índice común no puede
+-- aprovechar porque el comodín va al principio. pg_trgm parte el texto en
+-- trigramas y sí permite indexar ese tipo de búsqueda.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX idx_carga_destino_trgm ON CARGA USING gin (destino gin_trgm_ops);
+
+-- La bitácora siempre se pide por carga y ordenada por fecha (HU 8).
+CREATE INDEX idx_estado_carga_carga_tiempo ON ESTADO_CARGA (id_carga, marca_tiempo);
