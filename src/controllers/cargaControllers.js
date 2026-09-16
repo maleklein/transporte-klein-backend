@@ -429,10 +429,13 @@ const cambiarEstadoCarga = async (req, res) => {
         }
 
         const resultado = await client.query(
+            // Devuelve `peso_kg` sin renombrar, igual que GET /cargas/:id: la
+            // pantalla de detalle consume los dos y con el alias 'peso' que usan
+            // el alta y la edición se quedaba sin el dato tras cambiar de estado.
             `UPDATE CARGA
              SET estado_actual = $1
              WHERE id_carga = $2
-             RETURNING id_carga, origen, destino, tipo_carga, peso_kg AS peso,
+             RETURNING id_carga, origen, destino, tipo_carga, peso_kg,
                        TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
                        observaciones, estado_actual, id_admin_creador, creado_en, actualizado_en`,
             [estadoNuevo, idCarga]
