@@ -31,26 +31,56 @@ const ESTADOS = Object.freeze({
 const ESTADOS_VALIDOS = Object.freeze(Object.values(ESTADOS));
 
 /**
+ * Orden natural del ciclo de vida. Sirve para distinguir una transición que
+ * avanza de una que retrocede: si el destino aparece antes que el estado
+ * actual, es una corrección.
+ *
+ * `cancelada` queda afuera a propósito: no es un paso del flujo, es una salida.
+ */
+const FLUJO = Object.freeze([
+    ESTADOS.DISPONIBLE,
+    ESTADOS.PENDIENTE,
+    ESTADOS.ACEPTADA,
+    ESTADOS.EN_VIAJE,
+    ESTADOS.ENTREGADA,
+]);
+
+/**
  * Transiciones permitidas desde cada estado.
  *
- * Sale de las reglas del SRS:
- * - RN-01: una carga entregada no puede volver a estados anteriores, así que
- *   `entregada` no tiene salidas.
- * - HU 2.4: cancelar sólo se permite desde "disponible" o "pendiente"; desde
- *   "en viaje" o "entregada" tiene que dar error.
- * - `cancelada` también queda sin salidas: una carga cancelada se da de alta
- *   de nuevo, no se revive.
+ * Además de avanzar, se puede retroceder un paso mientras la carga no haya
+ * llegado a un estado final. Eso es deliberado: el administrador cambia los
+ * estados a mano y un clic equivocado tiene que poder corregirse. La corrección
+ * no borra nada — queda asentada en ESTADO_CARGA como cualquier otro cambio,
+ * que es justamente lo que el SRS (§979) espera de la bitácora: "permite
+ * auditar cualquier intento de transición inválida".
+ *
+ * Los dos estados finales salen de reglas distintas:
+ * - `entregada` por RN-01: "una carga entregada no puede volver a estados
+ *   anteriores". Es un hecho físico, la mercadería ya llegó.
+ * - `cancelada` por decisión del equipo: si hace falta, se da de alta una
+ *   carga nueva. Del clic accidental protege el diálogo de confirmación que
+ *   pide HU 2.4.
+ *
+ * Cancelar sólo se puede desde "disponible" o "pendiente" (HU 2.4): desde
+ * "en viaje" o "entregada" tiene que dar error.
  *
  * Que un estado tenga `[]` significa que es terminal.
  */
 const TRANSICIONES = Object.freeze({
     [ESTADOS.DISPONIBLE]: [ESTADOS.PENDIENTE, ESTADOS.CANCELADA],
-    [ESTADOS.PENDIENTE]: [ESTADOS.ACEPTADA, ESTADOS.CANCELADA],
-    [ESTADOS.ACEPTADA]: [ESTADOS.EN_VIAJE],
-    [ESTADOS.EN_VIAJE]: [ESTADOS.ENTREGADA],
+    [ESTADOS.PENDIENTE]: [ESTADOS.ACEPTADA, ESTADOS.DISPONIBLE, ESTADOS.CANCELADA],
+    [ESTADOS.ACEPTADA]: [ESTADOS.EN_VIAJE, ESTADOS.PENDIENTE],
+    [ESTADOS.EN_VIAJE]: [ESTADOS.ENTREGADA, ESTADOS.ACEPTADA],
     [ESTADOS.ENTREGADA]: [],
     [ESTADOS.CANCELADA]: [],
 });
+
+/**
+ * Estados de los que ya no se vuelve. Las transiciones hacia ellos son las
+ * únicas irreversibles, y por eso el frontend pide confirmación antes.
+ */
+const ESTADOS_FINALES = Object.freeze([ESTADOS.ENTREGADA, ESTADOS.CANCELADA]);
 
 /**
  * Indica si un texto es uno de los seis estados conocidos.
@@ -78,11 +108,28 @@ const transicionesDesde = (estadoActual) => TRANSICIONES[estadoActual] ?? [];
 const puedeTransicionar = (estadoActual, estadoNuevo) =>
     transicionesDesde(estadoActual).includes(estadoNuevo);
 
+/**
+ * Indica si la transición retrocede en el flujo, es decir, si corrige un
+ * cambio anterior en vez de avanzar el ciclo de vida.
+ *
+ * @param {string} estadoActual - estado en el que está la carga.
+ * @param {string} estadoNuevo - estado al que se la quiere llevar.
+ * @returns {boolean} true si el destino está antes en el flujo.
+ */
+const esCorreccion = (estadoActual, estadoNuevo) => {
+    const desde = FLUJO.indexOf(estadoActual);
+    const hasta = FLUJO.indexOf(estadoNuevo);
+    return desde !== -1 && hasta !== -1 && hasta < desde;
+};
+
 module.exports = {
     ESTADOS,
     ESTADOS_VALIDOS,
+    ESTADOS_FINALES,
+    FLUJO,
     TRANSICIONES,
     esEstadoValido,
     transicionesDesde,
     puedeTransicionar,
+    esCorreccion,
 };
