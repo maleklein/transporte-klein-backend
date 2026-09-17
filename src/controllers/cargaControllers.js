@@ -25,6 +25,74 @@ const ESTADO_INICIAL = ESTADOS.DISPONIBLE;
 const ESTADOS_BLOQUEADOS_EDICION = ['en_viaje', 'entregada'];
 
 /**
+ * Columnas de origen y destino, resueltas contra el catálogo geográfico.
+ *
+ * Además de los ids y los nombres por separado —que es lo que necesitan los
+ * selectores del formulario— arma un `origen` y un `destino` ya listos para
+ * mostrar. Así las pantallas que sólo los muestran (el detalle, las tarjetas
+ * del listado) siguen leyendo el mismo campo de siempre y no hubo que tocarlas.
+ *
+ * El CASE evita el "Santa Fe, Santa Fe" de las capitales que se llaman igual
+ * que su provincia, y el caso extremo de CABA, que repetiría el nombre entero.
+ *
+ * Se define una sola vez porque lo usan las cinco consultas del módulo: si
+ * alguna se quedara sin estos campos, la pantalla de detalle se quedaría sin
+ * la ruta después de esa operación.
+ */
+const COLUMNAS_UBICACION = `
+                    c.id_localidad_origen  AS origen_id,
+                    lo.nombre              AS origen_localidad,
+                    po.id_provincia        AS origen_provincia_id,
+                    po.nombre              AS origen_provincia,
+                    CASE WHEN lo.nombre = po.nombre THEN lo.nombre
+                         ELSE lo.nombre || ', ' || po.nombre END AS origen,
+                    c.id_localidad_destino AS destino_id,
+                    ld.nombre              AS destino_localidad,
+                    pd.id_provincia        AS destino_provincia_id,
+                    pd.nombre              AS destino_provincia,
+                    CASE WHEN ld.nombre = pd.nombre THEN ld.nombre
+                         ELSE ld.nombre || ', ' || pd.nombre END AS destino`;
+
+/** Los JOIN que hacen falta para que `COLUMNAS_UBICACION` resuelva. */
+const JOIN_UBICACION = `
+             JOIN LOCALIDAD lo ON lo.id_localidad = c.id_localidad_origen
+             JOIN PROVINCIA po ON po.id_provincia = lo.id_provincia
+             JOIN LOCALIDAD ld ON ld.id_localidad = c.id_localidad_destino
+             JOIN PROVINCIA pd ON pd.id_provincia = ld.id_provincia`;
+
+/**
+ * Verifica que las dos localidades del body existan en el catálogo.
+ *
+ * El validador sólo chequea que el id tenga la forma correcta, porque es
+ * síncrono y no toca la base. La existencia se comprueba acá, con una sola
+ * consulta para las dos. Sin esto, un id inventado terminaría en un error de
+ * clave foránea de Postgres y en un 500 genérico, cuando en realidad es un
+ * problema del dato que mandó el cliente.
+ *
+ * @param {object} ejecutor - pool o cliente de una transacción en curso.
+ * @param {{origen_id: string, destino_id: string}} valores - ids ya validados en su forma.
+ * @returns {Promise<Record<string, string>>} errores por campo; vacío si las dos existen.
+ */
+const verificarLocalidades = async (ejecutor, valores) => {
+    const resultado = await ejecutor.query(
+        'SELECT id_localidad FROM LOCALIDAD WHERE id_localidad = ANY($1::char(8)[])',
+        [[valores.origen_id, valores.destino_id]],
+    );
+
+    const existentes = new Set(resultado.rows.map((fila) => fila.id_localidad.trim()));
+    const errores = {};
+
+    if (!existentes.has(valores.origen_id)) {
+        errores.origen_id = 'Elegí un origen de la lista';
+    }
+    if (!existentes.has(valores.destino_id)) {
+        errores.destino_id = 'Elegí un destino de la lista';
+    }
+
+    return errores;
+};
+
+/**
  * POST /cargas: da de alta una carga y la deja en estado "disponible".
  *
  * Valida primero todos los campos y recién después consulta la base, así una
@@ -62,18 +130,37 @@ const crearCarga = async (req, res) => {
     try {
         await client.query('BEGIN');
 
+        // Las localidades se verifican dentro de la transacción, no antes: así
+        // no pueden borrarse del catálogo entre el chequeo y el INSERT.
+        const erroresLocalidad = await verificarLocalidades(client, valores);
+        if (Object.keys(erroresLocalidad).length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                message: 'Hay campos con errores',
+                errores: erroresLocalidad,
+            });
+        }
+
+        // El INSERT no puede hacer JOIN en su RETURNING, así que se envuelve en
+        // un CTE: se inserta y se vuelve a leer la fila ya resuelta contra el
+        // catálogo, todo en una sola ida a la base.
         const resultado = await client.query(
-            `INSERT INTO CARGA (origen, destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING id_carga, origen, destino, tipo_carga, peso_kg AS peso,
-                       -- Sin el TO_CHAR, el driver convierte el DATE a un Date de JS usando
-                       -- la zona horaria local y el front termina recibiendo un timestamp.
-                       TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
-                       observaciones, estado_actual, id_admin_creador, creado_en, actualizado_en`,
+            `WITH nueva AS (
+                 INSERT INTO CARGA (id_localidad_origen, id_localidad_destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 RETURNING *
+             )
+             SELECT c.id_carga,${COLUMNAS_UBICACION},
+                    c.tipo_carga, c.peso_kg,
+                    -- Sin el TO_CHAR, el driver convierte el DATE a un Date de JS usando
+                    -- la zona horaria local y el front termina recibiendo un timestamp.
+                    TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
+                    c.observaciones, c.estado_actual, c.id_admin_creador, c.creado_en, c.actualizado_en
+             FROM nueva c${JOIN_UBICACION}`,
             // Los valores ya vienen limpios y normalizados de validarCampos.
             [
-                valores.origen,
-                valores.destino,
+                valores.origen_id,
+                valores.destino_id,
                 valores.tipo_carga,
                 valores.peso,
                 valores.fecha,
@@ -114,7 +201,13 @@ const crearCarga = async (req, res) => {
  * Filtros:
  * - `estado`: comparación exacta contra `estado_actual`.
  * - `fecha`: comparación exacta contra la columna DATE (formato AAAA-MM-DD).
- * - `destino`: coincidencia parcial e insensible a mayúsculas (ILIKE).
+ * - `destino_provincia`: id de provincia (2 dígitos), comparación exacta.
+ * - `destino_localidad`: id de localidad (8 dígitos), comparación exacta.
+ *
+ * Los dos filtros de destino reemplazan al viejo `destino`, que era una
+ * coincidencia parcial sobre texto libre (ILIKE). Además de no encontrar lo
+ * mismo escrito de otra forma, ese filtro no escapaba los comodines: un
+ * `destino=50%` matcheaba cualquier cosa.
  *
  * Mismo patrón que `listarUsuarios`: el filtro que no vino se pasa como '' y la
  * condición `$n = '' OR ...` queda siempre verdadera, así no descarta filas.
@@ -127,20 +220,29 @@ const crearCarga = async (req, res) => {
  * Respuestas: 200 con el array de cargas · 400 si `fecha` tiene formato inválido ·
  * 500 ante un error inesperado.
  *
- * @param {import('express').Request} req - request de Express. Query params opcionales: estado, fecha, destino.
+ * @param {import('express').Request} req - request de Express. Query params opcionales: estado, fecha, destino_provincia, destino_localidad.
  * @param {import('express').Response} res - response de Express.
  * @returns {Promise<void>}
  */
 const listarCargas = async (req, res) => {
-    const { estado, fecha, destino } = req.query;
+    const { estado, fecha, destino_provincia: destinoProvincia, destino_localidad: destinoLocalidad } = req.query;
 
     const filtroFecha = fecha ? String(fecha).trim() : '';
     if (filtroFecha !== '' && !esFechaValida(filtroFecha)) {
         return res.status(400).json({ message: "El filtro 'fecha' debe tener formato AAAA-MM-DD" });
     }
 
+    const filtroProvincia = destinoProvincia ? String(destinoProvincia).trim() : '';
+    if (filtroProvincia !== '' && !/^\d{2}$/.test(filtroProvincia)) {
+        return res.status(400).json({ message: "El filtro 'destino_provincia' debe ser un id de provincia válido" });
+    }
+
+    const filtroLocalidad = destinoLocalidad ? String(destinoLocalidad).trim() : '';
+    if (filtroLocalidad !== '' && !/^\d{8}$/.test(filtroLocalidad)) {
+        return res.status(400).json({ message: "El filtro 'destino_localidad' debe ser un id de localidad válido" });
+    }
+
     let filtroEstado = estado ? String(estado).trim() : '';
-    const filtroDestino = destino ? `%${String(destino).trim()}%` : '';
 
     // HU 3: al camionero sólo se le muestran las cargas en "disponible", que son
     // a las que se puede postular. El filtro de estado que mande se ignora a
@@ -153,18 +255,20 @@ const listarCargas = async (req, res) => {
 
     try {
         const resultado = await pool.query(
-            `SELECT id_carga, origen, destino, tipo_carga, peso_kg,
+            `SELECT c.id_carga,${COLUMNAS_UBICACION},
+                    c.tipo_carga, c.peso_kg,
                     -- Mismo criterio que en el alta: sin TO_CHAR el driver devuelve
                     -- un Date de JS corrido por la zona horaria local.
-                    TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
-                    observaciones,
-                    estado_actual
-             FROM CARGA
-             WHERE ($1 = '' OR estado_actual = $1)
-               AND ($2 = '' OR fecha = $2::date)
-               AND ($3 = '' OR destino ILIKE $3)
-             ORDER BY fecha, id_carga`,
-            [filtroEstado, filtroFecha, filtroDestino]
+                    TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
+                    c.observaciones,
+                    c.estado_actual
+             FROM CARGA c${JOIN_UBICACION}
+             WHERE ($1 = '' OR c.estado_actual = $1)
+               AND ($2 = '' OR c.fecha = $2::date)
+               AND ($3 = '' OR pd.id_provincia = $3)
+               AND ($4 = '' OR c.id_localidad_destino = $4)
+             ORDER BY c.fecha, c.id_carga`,
+            [filtroEstado, filtroFecha, filtroProvincia, filtroLocalidad]
         );
 
         return res.status(200).json(resultado.rows);
@@ -195,14 +299,15 @@ const obtenerCarga = async (req, res) => {
 
     try {
         const resultado = await pool.query(
-            `SELECT id_carga, origen, destino, tipo_carga, peso_kg,
+            `SELECT c.id_carga,${COLUMNAS_UBICACION},
+                    c.tipo_carga, c.peso_kg,
                     -- Mismo criterio que en el listado: sin TO_CHAR el driver devuelve
                     -- un Date de JS corrido por la zona horaria local.
-                    TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
-                    observaciones,
-                    estado_actual
-             FROM CARGA
-             WHERE id_carga = $1`,
+                    TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
+                    c.observaciones,
+                    c.estado_actual
+             FROM CARGA c${JOIN_UBICACION}
+             WHERE c.id_carga = $1`,
             [idCarga]
         );
 
@@ -335,18 +440,33 @@ const actualizarCarga = async (req, res) => {
             });
         }
 
+        const erroresLocalidad = await verificarLocalidades(pool, valores);
+        if (Object.keys(erroresLocalidad).length > 0) {
+            return res.status(400).json({
+                message: 'Hay campos con errores',
+                errores: erroresLocalidad,
+            });
+        }
+
+        // Mismo CTE que en el alta: el UPDATE no puede hacer JOIN en su
+        // RETURNING, así que se vuelve a leer la fila ya resuelta.
         const resultado = await pool.query(
-            `UPDATE CARGA
-             SET origen = $1, destino = $2, tipo_carga = $3, peso_kg = $4, fecha = $5, observaciones = $6
-             WHERE id_carga = $7
-             RETURNING id_carga, origen, destino, tipo_carga, peso_kg AS peso,
-                       -- Mismo criterio que en el alta: sin TO_CHAR el driver devuelve
-                       -- un Date de JS corrido por la zona horaria local.
-                       TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
-                       observaciones, estado_actual, id_admin_creador, creado_en, actualizado_en`,
+            `WITH modificada AS (
+                 UPDATE CARGA
+                 SET id_localidad_origen = $1, id_localidad_destino = $2, tipo_carga = $3, peso_kg = $4, fecha = $5, observaciones = $6
+                 WHERE id_carga = $7
+                 RETURNING *
+             )
+             SELECT c.id_carga,${COLUMNAS_UBICACION},
+                    c.tipo_carga, c.peso_kg,
+                    -- Mismo criterio que en el alta: sin TO_CHAR el driver devuelve
+                    -- un Date de JS corrido por la zona horaria local.
+                    TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
+                    c.observaciones, c.estado_actual, c.id_admin_creador, c.creado_en, c.actualizado_en
+             FROM modificada c${JOIN_UBICACION}`,
             [
-                valores.origen,
-                valores.destino,
+                valores.origen_id,
+                valores.destino_id,
                 valores.tipo_carga,
                 valores.peso,
                 valores.fecha,
@@ -438,16 +558,22 @@ const cambiarEstadoCarga = async (req, res) => {
             });
         }
 
+        // El CTE no es opcional acá: la pantalla de detalle se redibuja con lo
+        // que devuelve este endpoint, así que si le faltaran los JOIN al
+        // catálogo se quedaría sin la ruta después de cada cambio de estado.
+        // Es el mismo problema que ya hubo con `peso_kg` y su alias.
         const resultado = await client.query(
-            // Devuelve `peso_kg` sin renombrar, igual que GET /cargas/:id: la
-            // pantalla de detalle consume los dos y con el alias 'peso' que usan
-            // el alta y la edición se quedaba sin el dato tras cambiar de estado.
-            `UPDATE CARGA
-             SET estado_actual = $1
-             WHERE id_carga = $2
-             RETURNING id_carga, origen, destino, tipo_carga, peso_kg,
-                       TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha,
-                       observaciones, estado_actual, id_admin_creador, creado_en, actualizado_en`,
+            `WITH modificada AS (
+                 UPDATE CARGA
+                 SET estado_actual = $1
+                 WHERE id_carga = $2
+                 RETURNING *
+             )
+             SELECT c.id_carga,${COLUMNAS_UBICACION},
+                    c.tipo_carga, c.peso_kg,
+                    TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
+                    c.observaciones, c.estado_actual, c.id_admin_creador, c.creado_en, c.actualizado_en
+             FROM modificada c${JOIN_UBICACION}`,
             [estadoNuevo, idCarga]
         );
 

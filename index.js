@@ -5,6 +5,7 @@ const cors = require('cors');
 const authControllers = require('./src/controllers/authControllers');
 const usuarioControllers = require('./src/controllers/usuarioControllers');
 const cargaControllers = require('./src/controllers/cargaControllers');
+const geografiaControllers = require('./src/controllers/geografiaControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
 const app = express();
@@ -22,6 +23,12 @@ app.post('/auth/login', authControllers.login);
 app.get('/usuarios', verifyToken, requireRol('administrador'), usuarioControllers.listarUsuarios);
 app.post('/usuarios', verifyToken, requireRol('administrador'), usuarioControllers.crearUsuario);
 app.put('/usuarios/:id', verifyToken, requireRol('administrador'), usuarioControllers.actualizarUsuario);
+
+// Catálogo geográfico: alimenta los selectores de provincia y localidad del
+// alta, la edición y el filtro del listado. Sin `requireRol` porque el filtro
+// lo usa cualquier usuario logueado, no sólo el administrador.
+app.get('/provincias', verifyToken, geografiaControllers.listarProvincias);
+app.get('/localidades', verifyToken, geografiaControllers.listarLocalidades);
 
 // Rutas de cargas.
 // Escribir (alta, edición, cambio de estado) es exclusivo del administrador.

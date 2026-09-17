@@ -3,7 +3,10 @@
 -- Para armar la base de cero:
 --   createdb transporte_klein_db
 --   psql -d transporte_klein_db -f script_tablas.sql
+--   node scripts/sembrar-localidades.js                (catálogo geográfico)
 --   node scripts/crear-admin.js <email> <contraseña>   (primer administrador)
+--
+-- La siembra va antes de crear cargas: CARGA referencia a LOCALIDAD.
 
 
 -- ============================================================
@@ -44,14 +47,60 @@ CREATE TABLE CAMIONERO (
 
 
 -- ============================================================
+-- PROVINCIA y LOCALIDAD — catálogo geográfico oficial.
+-- Se siembran una sola vez desde la API georef del gobierno
+-- (https://apis.datos.gob.ar/georef/api) con
+-- `node scripts/sembrar-localidades.js`.
+--
+-- Existen para que el origen y el destino de una carga dejen de ser
+-- texto libre: antes convivían en la misma base "Paraná, Entre Ríos",
+-- "Parana" y "parana" como tres destinos distintos, y el filtro del
+-- listado no encontraba lo que tenía que encontrar.
+--
+-- De georef se usa la entidad `localidades-censales` y no `localidades`
+-- ni `municipios`, por dos motivos medidos:
+--   * CABA da un único registro ("Ciudad Autónoma de Buenos Aires"),
+--     mientras que `localidades` la parte en 49 barrios. Para un flete,
+--     el destino es la ciudad entera.
+--   * Dentro de una misma provincia hay muchos menos nombres repetidos
+--     (4 en Buenos Aires contra 54 en `localidades`).
+-- ============================================================
+CREATE TABLE PROVINCIA (
+    -- El id es el de georef y se guarda como texto, NO como entero:
+    -- CABA es '02' y un INTEGER se comería el cero de la izquierda.
+    id_provincia CHAR(2) PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE LOCALIDAD (
+    -- Mismo criterio que arriba: id de georef, 8 dígitos, como texto.
+    -- Usarlo de PK en vez de un SERIAL propio evita una tabla de
+    -- correspondencias y deja que re-sembrar sea un ON CONFLICT.
+    id_localidad CHAR(8) PRIMARY KEY,
+    id_provincia CHAR(2) NOT NULL REFERENCES PROVINCIA(id_provincia),
+    nombre VARCHAR(100) NOT NULL,
+    -- Desambigua los 68 pares (provincia, nombre) que están repetidos en
+    -- todo el país: sin el departamento, el selector mostraría dos
+    -- opciones idénticas y no habría forma de saber cuál es cuál.
+    departamento VARCHAR(100),
+    -- Centroide de la localidad. Todavía sin usar: es lo que va a
+    -- permitir calcular kilometros_estimados (HU 9).
+    latitud NUMERIC(9, 6) NOT NULL,
+    longitud NUMERIC(9, 6) NOT NULL
+);
+
+
+-- ============================================================
 -- CARGA — objeto central del negocio: cada solicitud de transporte.
 -- Los seis primeros campos son los que pide el formulario de alta
 -- (HU 2.1.1); el resto es estimación económica y trazabilidad.
 -- ============================================================
 CREATE TABLE CARGA (
     id_carga SERIAL PRIMARY KEY,
-    origen VARCHAR(150) NOT NULL,
-    destino VARCHAR(150) NOT NULL,
+    -- Origen y destino apuntan al catálogo: la base ya no acepta texto
+    -- libre, así que no puede haber una carga con un destino inventado.
+    id_localidad_origen CHAR(8) NOT NULL REFERENCES LOCALIDAD(id_localidad),
+    id_localidad_destino CHAR(8) NOT NULL REFERENCES LOCALIDAD(id_localidad),
     tipo_carga VARCHAR(100) NOT NULL,
     peso_kg NUMERIC NOT NULL,
     fecha DATE NOT NULL,
@@ -127,11 +176,13 @@ EXECUTE FUNCTION actualizar_timestamp();
 -- filtra por estado y ordena por fecha: este índice cubre los dos casos.
 CREATE INDEX idx_carga_estado_fecha ON CARGA (estado_actual, fecha);
 
--- El filtro por destino usa ILIKE '%texto%', que un índice común no puede
--- aprovechar porque el comodín va al principio. pg_trgm parte el texto en
--- trigramas y sí permite indexar ese tipo de búsqueda.
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX idx_carga_destino_trgm ON CARGA USING gin (destino gin_trgm_ops);
+-- El filtro por destino compara ids exactos contra el catálogo, así que
+-- alcanza con un índice común. Antes era un ILIKE '%texto%' sobre una
+-- columna de texto libre y hacía falta un índice trigram (pg_trgm).
+CREATE INDEX idx_carga_destino_localidad ON CARGA (id_localidad_destino);
+
+-- El selector de localidades siempre pide "las de esta provincia, ordenadas".
+CREATE INDEX idx_localidad_provincia_nombre ON LOCALIDAD (id_provincia, nombre);
 
 -- La bitácora siempre se pide por carga y ordenada por fecha (HU 8).
 CREATE INDEX idx_estado_carga_carga_tiempo ON ESTADO_CARGA (id_carga, marca_tiempo);

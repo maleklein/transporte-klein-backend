@@ -11,18 +11,33 @@
  * 500 genérico, sin decirle al usuario qué campo se pasó.
  */
 const CAMPOS_TEXTO = {
-    origen: 150,
-    destino: 150,
     tipo_carga: 100,
     observaciones: 1000,
 };
 
 /**
- * Campos cuyo texto se normaliza con la primera letra en mayúscula, para que
- * "rosario" y "Rosario" no queden como dos destinos distintos en el listado.
- * `observaciones` queda afuera: es texto libre y no se usa para agrupar.
+ * Origen y destino, que ya no son texto libre sino ids de localidad del
+ * catálogo (tabla LOCALIDAD, sembrada desde georef).
+ *
+ * Acá sólo se valida la FORMA: que venga, que sea texto y que tenga los ocho
+ * dígitos que usa georef. Que la localidad EXISTA lo verifica el controlador,
+ * que ya consulta la base para armar la respuesta. Se hace así para que esta
+ * función siga siendo síncrona y sin acceso a la base.
  */
-const CAMPOS_A_NORMALIZAR = ['origen', 'destino', 'tipo_carga'];
+const CAMPOS_LOCALIDAD = ['origen_id', 'destino_id'];
+
+/** Formato del id de localidad de georef: ocho dígitos, ej '82084270'. */
+const FORMATO_ID_LOCALIDAD = /^\d{8}$/;
+
+/**
+ * Campos cuyo texto se normaliza con la primera letra en mayúscula.
+ * `observaciones` queda afuera: es texto libre y no se usa para agrupar.
+ *
+ * Antes estaban también origen y destino, como parche para que "rosario" y
+ * "Rosario" no quedaran como dos destinos distintos. Ya no hace falta: ahora
+ * son ids de un catálogo, así que no hay dos formas de escribir lo mismo.
+ */
+const CAMPOS_A_NORMALIZAR = ['tipo_carga'];
 
 /** Rango razonable para la columna `peso_kg` (numeric). */
 const PESO_MINIMO = 0.01;
@@ -113,10 +128,10 @@ const esFechaValida = (valor) => {
 };
 
 /**
- * Valida los seis campos de una carga (origen, destino, tipo_carga, peso,
- * fecha, observaciones) contra un body de Express. Todos son obligatorios:
- * la usan tanto el alta como la edición, y ninguna de las dos admite carga
- * parcial.
+ * Valida los seis campos de una carga (origen_id, destino_id, tipo_carga,
+ * peso, fecha, observaciones) contra un body de Express. Todos son
+ * obligatorios: la usan tanto el alta como la edición, y ninguna de las dos
+ * admite carga parcial.
  *
  * Acumula todos los errores en vez de cortar en el primero, para que el
  * formulario pueda marcar de una vez todos los campos con problema.
@@ -124,7 +139,7 @@ const esFechaValida = (valor) => {
  * @param {Record<string, unknown>} body - req.body de Express.
  * @returns {{
  *   errores: Record<string, string>,
- *   valores: {origen?: string, destino?: string, tipo_carga?: string, observaciones?: string, peso?: number, fecha?: string}
+ *   valores: {origen_id?: string, destino_id?: string, tipo_carga?: string, observaciones?: string, peso?: number, fecha?: string}
  * }} errores agrupados por campo, y los valores ya limpios/normalizados de los campos que pasaron.
  */
 const validarCampos = (body) => {
@@ -151,6 +166,27 @@ const validarCampos = (body) => {
             errores[campo] = `El campo '${campo}' no puede superar los ${largoMaximo} caracteres`;
         } else {
             valores[campo] = CAMPOS_A_NORMALIZAR.includes(campo) ? normalizar(limpio) : limpio;
+        }
+    }
+
+    for (const campo of CAMPOS_LOCALIDAD) {
+        const valor = body[campo];
+
+        if (typeof valor !== 'string') {
+            errores[campo] = valor === undefined || valor === null
+                ? `El campo '${campo}' es obligatorio`
+                : `El campo '${campo}' debe ser texto`;
+            continue;
+        }
+
+        const limpio = valor.trim();
+
+        if (limpio === '') {
+            errores[campo] = `El campo '${campo}' es obligatorio`;
+        } else if (!FORMATO_ID_LOCALIDAD.test(limpio)) {
+            errores[campo] = `El campo '${campo}' debe ser un id de localidad válido`;
+        } else {
+            valores[campo] = limpio;
         }
     }
 
@@ -182,6 +218,7 @@ module.exports = {
     validarCampos,
     esFechaValida,
     CAMPOS_TEXTO,
+    CAMPOS_LOCALIDAD,
     PESO_MINIMO,
     PESO_MAXIMO,
     ANIO_MINIMO,
