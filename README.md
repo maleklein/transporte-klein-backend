@@ -8,37 +8,28 @@ API del sistema de gestión de cargas. Node + Express + PostgreSQL.
 
 **Esto hay que correrlo una vez cuando traigas esta rama.** El origen y el
 destino de una carga dejaron de ser texto libre y ahora apuntan a un catálogo de
-provincias y localidades. Si no actualizás la base, el backend no arranca bien:
-las consultas de cargas hacen JOIN contra tablas que todavía no existen.
+provincias y localidades. Si no actualizás la base, el listado de cargas falla
+con `relation "localidad" does not exist`: las consultas hacen JOIN contra
+tablas que todavía no existen.
 
-Elegí el caso que te toque.
-
-### Caso A — ya tenés la base armada y querés conservar tus datos
-
-Tres comandos, en este orden:
+### Si ya tenés la base armada
 
 ```bash
 psql -d transporte_klein_db -f migrations/001_catalogo_geografico.sql
 node scripts/sembrar-localidades.js
-psql -d transporte_klein_db -f migrations/002_migrar_cargas.sql
 ```
 
-Qué hace cada uno:
+La migración crea las tablas del catálogo, cambia las columnas de `CARGA` y
+**borra las cargas que tengas**. Los usuarios quedan: no hace falta volver a
+correr `crear-admin.js` ni loguearse de nuevo.
 
-1. **001** crea las tablas `PROVINCIA` y `LOCALIDAD`, y le agrega a `CARGA` las
-   dos columnas nuevas (todavía vacías).
-2. **La siembra** llena el catálogo: quedan 24 provincias y 4027 localidades.
-3. **002** convierte las cargas que ya tenías: busca cada texto ("Parana",
-   "Bariloche") en el catálogo y lo reemplaza por la localidad que corresponde.
+Las cargas se borran a propósito. Eran de prueba, con el origen y el destino
+escritos a mano ("Parana", "Bariloche"), y convertirlas al catálogo obligaba a
+decidir a mano cosas como si "Buenos Aires" era la ciudad o la provincia. Se
+vuelven a cargar desde la pantalla de alta, que además es la forma de comprobar
+que el circuito nuevo anda.
 
-El paso 3 es seguro: corre entero en una transacción y verifica antes de
-confirmar. Si alguna carga quedara sin convertir, aborta y no toca nada.
-
-Las columnas viejas no se borran: quedan como `origen_legacy` y
-`destino_legacy` por si hay que volver atrás. Se borran más adelante, con
-`migrations/003_borrar_legacy.sql`, cuando esté todo funcionando.
-
-### Caso B — base nueva, o preferís rehacerla de cero
+### Si preferís armar la base de cero
 
 ```bash
 dropdb --if-exists transporte_klein_db
@@ -48,23 +39,20 @@ node scripts/sembrar-localidades.js
 node scripts/crear-admin.js <email> <contraseña>
 ```
 
-`script_tablas.sql` ya crea el esquema nuevo, así que acá no hay que correr
-ninguna migración.
+`script_tablas.sql` ya trae el esquema nuevo: acá no va ninguna migración.
 
-**La siembra va antes de crear cargas**, en los dos casos: `CARGA` referencia a
+**En los dos casos la siembra va antes de crear cargas**: `CARGA` referencia a
 `LOCALIDAD`, así que sin catálogo no se puede dar de alta nada.
 
-### Si te da error
+### Si algo falla
 
-- **`relation "localidad" does not exist`** al listar cargas: falta correr 001 y
-  la siembra.
-- **`no se pudo sembrar el catálogo`**: el script intenta bajar los datos de la
-  API georef del gobierno. Si no tenés internet o el servicio está caído, usalo
-  con el respaldo que está commiteado en el repo:
+- **`no se pudo sembrar el catálogo`**: el script baja los datos de la API
+  georef del gobierno. Si no tenés internet o el servicio está caído, usá el
+  respaldo que está commiteado en el repo:
   ```bash
   node scripts/sembrar-localidades.js --offline
   ```
-- **La siembra se puede correr las veces que haga falta.** No duplica nada:
+- **La siembra se puede repetir las veces que haga falta.** No duplica nada:
   actualiza lo que ya está.
 
 ---
