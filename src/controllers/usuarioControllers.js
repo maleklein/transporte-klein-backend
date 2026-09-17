@@ -1,14 +1,26 @@
 const pool = require('../db');
 const bcrypt = require('bcrypt');
 
+// Campos obligatorios para cualquier usuario, sin importar su rol.
 const CAMPOS_OBLIGATORIOS = ['nombre', 'apellido', 'dni', 'email', 'contraseña', 'rol'];
+
+// Campos que solo se piden cuando el rol es 'camionero'.
 const CAMPOS_CAMIONERO = ['ubicacion', 'tipo_vehiculo', 'capacidad_kg'];
 const ROLES_VALIDOS = ['administrador', 'camionero'];
 
+// Usadas por actualizarUsuario (HU 1.2).
 const CAMPOS_EDITABLES = ['nombre', 'apellido', 'email', 'estado'];
 const CAMPOS_BLOQUEADOS = ['dni', 'rol', 'contraseña'];
-const ESTADOS_VALIDOS = ['activo', 'inactivo']; 
+const ESTADOS_VALIDOS = ['activo', 'inactivo'];
 
+/**
+ * Controlador de POST /usuarios: da de alta un usuario (administrador o camionero).
+ * Si el rol es 'camionero', crea además el registro asociado en CAMIONERO.
+ *
+ * @param {import('express').Request} req - Body: { nombre, apellido, dni, email, contraseña, rol, ubicacion?, tipo_vehiculo?, capacidad_kg? }.
+ * @param {import('express').Response} res
+ * @returns {Promise<import('express').Response>} 201 con el usuario creado, 400 por validación o duplicados, 500 ante error inesperado.
+ */
 const crearUsuario = async (req, res) => {
     const { nombre, apellido, dni, email, contraseña, ubicacion, tipo_vehiculo, capacidad_kg } = req.body;
 
@@ -19,6 +31,7 @@ const crearUsuario = async (req, res) => {
         }
     }
 
+    // Se normaliza para que "Administrador " o "CAMIONERO" también sean válidos.
     const rol = String(req.body.rol).trim().toLowerCase();
     if (!ROLES_VALIDOS.includes(rol)) {
         return res.status(400).json({ message: "El campo 'rol' debe ser 'administrador' o 'camionero'" });
@@ -37,11 +50,15 @@ const crearUsuario = async (req, res) => {
     }
 
     try {
+        // Se valida duplicados antes del INSERT para devolver un mensaje específico por campo;
+        // el catch de más abajo (error 23505) queda como red de seguridad ante condiciones de carrera.
         const dniExistente = await pool.query('SELECT id_usuario FROM USUARIO WHERE dni = $1', [dni]);
         if (dniExistente.rows.length > 0) {
             return res.status(400).json({ message: 'El DNI ya está registrado' });
         }
 
+        // Se usa una transacción porque el alta de CAMIONERO depende del id_usuario recién
+        // creado: si el insert de camionero falla, el usuario tampoco debe quedar persistido.
         const emailExistente = await pool.query('SELECT id_usuario FROM USUARIO WHERE email = $1', [email]);
         if (emailExistente.rows.length > 0) {
             return res.status(400).json({ message: 'El email ya está registrado' });
@@ -74,6 +91,7 @@ const crearUsuario = async (req, res) => {
 
             await client.query('COMMIT');
 
+            // "camionero" solo se agrega a la respuesta si el usuario creado es un camionero.
             return res.status(201).json({
                 ...nuevoUsuario,
                 ...(camionero && { camionero }),
@@ -85,6 +103,8 @@ const crearUsuario = async (req, res) => {
             client.release();
         }
     } catch (error) {
+        // Safety net: cubre el caso en que dos requests pasan la validación de duplicados
+        // casi al mismo tiempo y ambos llegan al INSERT, que la constraint UNIQUE frena.
         if (error.code === '23505') {
             const campo = error.constraint === 'usuario_dni_key' ? 'DNI' : 'email';
             return res.status(400).json({ message: `El ${campo} ya está registrado` });
@@ -94,10 +114,15 @@ const crearUsuario = async (req, res) => {
     }
 };
 
-// PUT /usuarios/:id
-// Edita nombre, apellido, email y estado de un usuario existente; dni, rol y contraseña quedan protegidos.
-// Si el usuario es camionero, valida y actualiza también sus datos en CAMIONERO.
-// (Malena Klein)
+/**
+ * Controlador de PUT /usuarios/:id: edita datos de un usuario existente.
+ * No permite modificar dni, rol ni contraseña desde este endpoint.
+ * Si el usuario es camionero, actualiza también sus datos en CAMIONERO.
+ *
+ * @param {import('express').Request} req - Params: id. Body: { nombre, apellido, email, estado, ubicacion?, tipo_vehiculo?, capacidad_kg? }.
+ * @param {import('express').Response} res
+ * @returns {Promise<import('express').Response>} 200 con el usuario actualizado, 400 por validación o email duplicado, 404 si no existe, 500 ante error inesperado.
+ */
 const actualizarUsuario = async (req, res) => {
     // req.params siempre llega como texto, por eso se convierte a número
     const idUsuario = Number(req.params.id);
@@ -112,7 +137,6 @@ const actualizarUsuario = async (req, res) => {
         }
     }
 
-    // El PUT reemplaza estos campos por completo, así que ninguno puede faltar
     for (const campo of CAMPOS_EDITABLES) {
         const valor = req.body[campo];
         if (valor === undefined || valor === null || String(valor).trim() === '') {
@@ -127,14 +151,15 @@ const actualizarUsuario = async (req, res) => {
     }
 
     try {
-        // Confirma que el usuario exista y trae su rol, que es fijo y no viene en el body
+        // Se busca el usuario primero para confirmar que existe y para saber su rol
+        // (el rol no viene en el body porque es un campo bloqueado, pero hace falta
+        // para decidir si también hay que actualizar CAMIONERO).
         const usuarioExistente = await pool.query('SELECT id_usuario, rol FROM USUARIO WHERE id_usuario = $1', [idUsuario]);
         if (usuarioExistente.rows.length === 0) {
             return res.status(404).json({ message: 'Usuario no encontrado' });
         }
         const rol = usuarioExistente.rows[0].rol;
 
-        // Solo si es camionero se exigen y actualizan los campos de CAMIONERO
         if (rol === 'camionero') {
             for (const campo of CAMPOS_CAMIONERO) {
                 const valor = req.body[campo];
@@ -147,6 +172,8 @@ const actualizarUsuario = async (req, res) => {
             }
         }
 
+        // Se valida el email duplicado excluyendo al propio usuario que se está editando,
+        // para no rechazar el guardado si no cambió su email.
         const emailExistente = await pool.query(
             'SELECT id_usuario FROM USUARIO WHERE email = $1 AND id_usuario <> $2', // ignora la fila del propio usuario que se está editando
             [email, idUsuario]
@@ -155,7 +182,8 @@ const actualizarUsuario = async (req, res) => {
             return res.status(400).json({ message: 'El email ya está registrado' });
         }
 
-        // Conexión propia para poder usar una transacción: los dos UPDATE se guardan juntos o ninguno
+        // Transacción: si el usuario es camionero, los dos UPDATE (USUARIO y CAMIONERO)
+        // se guardan juntos o ninguno, igual que en crearUsuario.        
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
@@ -181,7 +209,6 @@ const actualizarUsuario = async (req, res) => {
 
             await client.query('COMMIT');
 
-            // Agrega el objeto "camionero" a la respuesta solo si aplica
             return res.status(200).json({
                 ...usuarioActualizado,
                 ...(camionero && { camionero }),
@@ -201,14 +228,17 @@ const actualizarUsuario = async (req, res) => {
     }
 };
 
-// GET /usuarios
-// Devuelve el listado de usuarios, con filtros opcionales por nombre, dni, rol y estado (combinables entre sí).
-// Si el usuario es camionero, suma sus datos de CAMIONERO en la respuesta.
-// (Malena Klein)
+/**
+ * Controlador de GET /usuarios: lista usuarios, con filtros opcionales y
+ * combinables por nombre, dni, rol y estado (todos vía query string).
+ *
+ * @param {import('express').Request} req - Query params opcionales: nombre, dni, rol, estado.
+ * @param {import('express').Response} res
+ * @returns {Promise<import('express').Response>} 200 con el listado de usuarios, 400 si algún filtro es inválido, 500 ante error inesperado.
+ */
 const listarUsuarios = async (req, res) => {
     const { nombre, dni, rol, estado } = req.query;
 
-    // Los filtros son opcionales, pero si vienen tienen que ser valores válidos
     if (rol !== undefined && !ROLES_VALIDOS.includes(String(rol).trim().toLowerCase())) {
         return res.status(400).json({ message: "El filtro 'rol' debe ser 'administrador' o 'camionero'" });
     }
@@ -238,7 +268,6 @@ const listarUsuarios = async (req, res) => {
             [filtroNombre, filtroDni, filtroRol, filtroEstado]
         );
 
-        // Separa las columnas de CAMIONERO en un sub-objeto y las descarta si el usuario es administrador
         const usuarios = resultado.rows.map(fila => {
             const { ubicacion, disponibilidad, tipo_vehiculo, capacidad_kg, ...usuario } = fila;
             const camionero = usuario.rol === 'camionero' ? { ubicacion, disponibilidad, tipo_vehiculo, capacidad_kg } : null;
