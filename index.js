@@ -7,7 +7,7 @@ const usuarioControllers = require('./src/controllers/usuarioControllers');
 const cargaControllers = require('./src/controllers/cargaControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 const postulacionControllers = require('./src/controllers/postulacionControllers');
-
+const asignacionControllers = require('./src/controllers/asignacionControllers');
 
 
 const app = express();
@@ -38,6 +38,8 @@ app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialC
 // Postulaciones (HU 4)
 app.post('/cargas/:id/postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.crearPostulacion);
 app.get('/postulaciones/mis-postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.obtenerMisPostulaciones);
+// HU 6 - Asignar carga a camionero
+app.post('/asignaciones', verifyToken, requireRol('administrador'), asignacionControllers.asignarCamionero);
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
