@@ -20,9 +20,10 @@ const ESTADO_INICIAL = ESTADOS.DISPONIBLE;
 /**
  * Estados desde los que ya no se puede editar una carga (HU 2.2): una vez que
  * está en viaje o fue entregada, sus datos pasan a ser el registro de lo que
- * efectivamente pasó, no un borrador que se pueda seguir corrigiendo.
+ * efectivamente pasó, no un borrador que se pueda seguir corrigiendo. Una
+ * carga cancelada tampoco se edita: no hay viaje que seguir planificando.
  */
-const ESTADOS_BLOQUEADOS_EDICION = ['en_viaje', 'entregada'];
+const ESTADOS_BLOQUEADOS_EDICION = [ESTADOS.EN_VIAJE, ESTADOS.ENTREGADA, ESTADOS.CANCELADA];
 
 /**
  * Columnas de origen y destino, resueltas contra el catálogo geográfico.
@@ -428,12 +429,14 @@ const actualizarCarga = async (req, res) => {
 
         const estadoActual = cargaExistente.rows[0].estado_actual;
         if (ESTADOS_BLOQUEADOS_EDICION.includes(estadoActual)) {
-            // Los dos casos no son lo mismo: el de "en viaje" se puede
+            // Los tres casos no son lo mismo: el de "en viaje" se puede
             // destrabar volviendo la carga a "aceptada", y conviene decírselo
             // a quien intentó editarla en vez de dejarlo en un callejón.
             const motivo = estadoActual === ESTADOS.EN_VIAJE
                 ? "Mientras está en viaje no se pueden modificar sus datos. Si necesitás corregir algo, volvé a pasarla a 'aceptada' primero."
-                : 'La carga ya fue entregada: sus datos quedan como registro de lo que pasó.';
+                : estadoActual === ESTADOS.ENTREGADA
+                    ? 'La carga ya fue entregada: sus datos quedan como registro de lo que pasó.'
+                    : 'La carga está cancelada: no tiene sentido modificar los datos de un viaje que no va a salir.';
 
             return res.status(409).json({
                 message: `No se puede editar una carga en estado '${estadoActual}'. ${motivo}`,
@@ -591,6 +594,106 @@ const cambiarEstadoCarga = async (req, res) => {
     }
 };
 
+/**
+ * PATCH /cargas/:id/cancelar (HU 2.4): cancela una carga.
+ *
+ * Es un atajo de `cambiarEstadoCarga` para el caso puntual de cancelar: no
+ * recibe `estado` en el body, así que el frontend no necesita mandarlo, y da
+ * un mensaje de error específico para cada motivo de rechazo en vez del
+ * genérico "no se puede pasar de X a Y" de HU 7. La transición en sí —qué
+ * estados pueden cancelarse— la sigue decidiendo la máquina de estados
+ * (`puedeTransicionar`), no se duplica acá.
+ *
+ * Mismo patrón transaccional que `cambiarEstadoCarga`: `FOR UPDATE` para que
+ * dos cancelaciones simultáneas no pisen el chequeo de estado, y el UPDATE de
+ * la carga junto con el INSERT en la bitácora (HU 8) en la misma transacción.
+ *
+ * Respuestas: 200 con la carga cancelada · 400 si `id` no es numérico ·
+ * 404 si no existe la carga · 409 si ya está cancelada o si su estado no
+ * admite cancelarse (en viaje o entregada) · 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express. Params: id.
+ * @param {import('express').Response} res - response de Express.
+ * @returns {Promise<void>}
+ */
+const cancelarCarga = async (req, res) => {
+    const idCarga = Number(req.params.id);
+    if (!Number.isInteger(idCarga) || idCarga <= 0) {
+        return res.status(400).json({ message: "El parámetro 'id' debe ser numérico" });
+    }
+
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // Mismo FOR UPDATE que cambiarEstadoCarga: bloquea la fila hasta el
+        // commit para que el chequeo de estado se haga contra un valor que no
+        // puede cambiar por debajo mientras dura la transacción.
+        const cargaExistente = await client.query(
+            'SELECT id_carga, estado_actual FROM CARGA WHERE id_carga = $1 FOR UPDATE',
+            [idCarga]
+        );
+
+        if (cargaExistente.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
+        }
+
+        const estadoActual = cargaExistente.rows[0].estado_actual;
+
+        if (estadoActual === ESTADOS.CANCELADA) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ message: 'La carga ya está cancelada.' });
+        }
+
+        if (!puedeTransicionar(estadoActual, ESTADOS.CANCELADA)) {
+            await client.query('ROLLBACK');
+
+            // En viaje y entregada tienen cada uno su propio motivo (HU 2.4);
+            // el resto (hoy sólo "aceptada") cae en el mensaje genérico de la
+            // regla "sólo se cancela desde disponible o pendiente".
+            const motivo = estadoActual === ESTADOS.EN_VIAJE
+                ? 'La carga ya está en viaje: no se puede cancelar, sólo registrar su entrega.'
+                : estadoActual === ESTADOS.ENTREGADA
+                    ? 'La carga ya fue entregada: no se puede cancelar un hecho que ya ocurrió.'
+                    : `No se puede cancelar una carga en estado '${estadoActual}'. Sólo se puede cancelar desde 'disponible' o 'pendiente'.`;
+
+            return res.status(409).json({ message: motivo });
+        }
+
+        // Mismo CTE que cambiarEstadoCarga: la pantalla de detalle necesita la
+        // carga con el catálogo geográfico ya resuelto, no sólo el id y el
+        // estado nuevo.
+        const resultado = await client.query(
+            `WITH modificada AS (
+                 UPDATE CARGA
+                 SET estado_actual = $1
+                 WHERE id_carga = $2
+                 RETURNING *
+             )
+             SELECT c.id_carga,${COLUMNAS_UBICACION},
+                    c.tipo_carga, c.peso_kg,
+                    TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
+                    c.observaciones, c.estado_actual, c.id_admin_creador, c.creado_en, c.actualizado_en
+             FROM modificada c${JOIN_UBICACION}`,
+            [ESTADOS.CANCELADA, idCarga]
+        );
+
+        await registrarCambioEstado(idCarga, estadoActual, ESTADOS.CANCELADA, req.usuario.id, client);
+
+        await client.query('COMMIT');
+
+        return res.status(200).json(resultado.rows[0]);
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error(error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     crearCarga,
     listarCargas,
@@ -598,4 +701,5 @@ module.exports = {
     obtenerHistorialCarga,
     actualizarCarga,
     cambiarEstadoCarga,
+    cancelarCarga,
 };
