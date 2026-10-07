@@ -41,6 +41,7 @@ app.get('/cargas/:id', verifyToken, cargaControllers.obtenerCarga);
 app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialCarga);
 app.put('/cargas/:id', verifyToken, requireRol('administrador'), cargaControllers.actualizarCarga);
 app.patch('/cargas/:id/estado', verifyToken, requireRol('administrador'), cargaControllers.cambiarEstadoCarga);
+app.patch('/cargas/:id/cancelar', verifyToken, requireRol('administrador'), cargaControllers.cancelarCarga);
 app.post('/cargas/:id/recalcular-km', verifyToken, requireRol('administrador'), cargaControllers.recalcularKmCarga);
 
 // Iniciar servidor
