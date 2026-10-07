@@ -20,9 +20,10 @@ const ESTADO_INICIAL = ESTADOS.DISPONIBLE;
 /**
  * Estados desde los que ya no se puede editar una carga (HU 2.2): una vez que
  * está en viaje o fue entregada, sus datos pasan a ser el registro de lo que
- * efectivamente pasó, no un borrador que se pueda seguir corrigiendo.
+ * efectivamente pasó, no un borrador que se pueda seguir corrigiendo. Una
+ * carga cancelada tampoco se edita: no hay viaje que seguir planificando.
  */
-const ESTADOS_BLOQUEADOS_EDICION = ['en_viaje', 'entregada'];
+const ESTADOS_BLOQUEADOS_EDICION = [ESTADOS.EN_VIAJE, ESTADOS.ENTREGADA, ESTADOS.CANCELADA];
 
 /**
  * Columnas de origen y destino, resueltas contra el catálogo geográfico.
@@ -428,12 +429,14 @@ const actualizarCarga = async (req, res) => {
 
         const estadoActual = cargaExistente.rows[0].estado_actual;
         if (ESTADOS_BLOQUEADOS_EDICION.includes(estadoActual)) {
-            // Los dos casos no son lo mismo: el de "en viaje" se puede
+            // Los tres casos no son lo mismo: el de "en viaje" se puede
             // destrabar volviendo la carga a "aceptada", y conviene decírselo
             // a quien intentó editarla en vez de dejarlo en un callejón.
             const motivo = estadoActual === ESTADOS.EN_VIAJE
                 ? "Mientras está en viaje no se pueden modificar sus datos. Si necesitás corregir algo, volvé a pasarla a 'aceptada' primero."
-                : 'La carga ya fue entregada: sus datos quedan como registro de lo que pasó.';
+                : estadoActual === ESTADOS.ENTREGADA
+                    ? 'La carga ya fue entregada: sus datos quedan como registro de lo que pasó.'
+                    : 'La carga está cancelada: no tiene sentido modificar los datos de un viaje que no va a salir.';
 
             return res.status(409).json({
                 message: `No se puede editar una carga en estado '${estadoActual}'. ${motivo}`,
