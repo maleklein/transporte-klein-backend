@@ -4,6 +4,21 @@ API del sistema de gestión de cargas. Node + Express + PostgreSQL.
 
 ---
 
+## Actualizar la base: kilómetros estimados (HU 9)
+
+Si tu base ya tiene el catálogo geográfico (la sección de abajo), alcanza con:
+
+```bash
+psql -d transporte_klein_db -f migrations/002_kilometros_estimados.sql
+```
+
+Agrega a `CARGA` la columna `estado_calculo_km` y le da escala a
+`kilometros_estimados`. No borra nada: las cargas que ya tenías quedan con el
+cálculo pendiente y se recalculan con el botón Reintentar de su detalle. Si la
+base la armás de cero, no hace falta: `script_tablas.sql` ya trae las columnas.
+
+---
+
 ## Actualizar la base con el catálogo geográfico
 
 **Esto hay que correrlo una vez cuando traigas esta rama.** El origen y el

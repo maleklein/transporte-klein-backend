@@ -83,8 +83,8 @@ CREATE TABLE LOCALIDAD (
     -- todo el país: sin el departamento, el selector mostraría dos
     -- opciones idénticas y no habría forma de saber cuál es cuál.
     departamento VARCHAR(100),
-    -- Centroide de la localidad. Todavía sin usar: es lo que va a
-    -- permitir calcular kilometros_estimados (HU 9).
+    -- Centroide de la localidad: es lo que se le pasa al servicio de
+    -- mapas para calcular kilometros_estimados (HU 9).
     latitud NUMERIC(9, 6) NOT NULL,
     longitud NUMERIC(9, 6) NOT NULL
 );
@@ -105,9 +105,15 @@ CREATE TABLE CARGA (
     peso_kg NUMERIC NOT NULL,
     fecha DATE NOT NULL,
     observaciones TEXT,
-    -- Estimaciones: todavía sin usar, quedan para cuando se calcule
-    -- la distancia entre origen y destino.
-    kilometros_estimados NUMERIC,
+    -- Distancia por ruta entre origen y destino, calculada con el
+    -- servicio de mapas al dar de alta la carga (HU 9).
+    kilometros_estimados NUMERIC(10, 2),
+    -- Resultado del último intento de cálculo: 'ok' (hay valor),
+    -- 'pendiente' (el proveedor no respondió, se puede reintentar) o
+    -- 'error' (reservado para cuando no haya ruta posible).
+    estado_calculo_km VARCHAR(10) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado_calculo_km IN ('ok', 'pendiente', 'error')),
+    -- Estimaciones económicas: todavía sin usar.
     costo_estimado NUMERIC,
     ganancia_estimada NUMERIC,
     -- Estado vigente. Nace 'disponible' y HU 2.3 lo pasa a 'publicada'.
