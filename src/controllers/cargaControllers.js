@@ -1,11 +1,12 @@
 /**
- * Controlador del módulo de Cargas (HU 2.1 + 2.1.1 + 2.2 + 3 + 7 + 8).
+ * Controlador del módulo de Cargas (HU 2.1 + 2.1.1 + 2.2 + 3 + 7 + 8 + 12).
  * Expone el alta, la edición, la consulta y el cambio de estado de las cargas.
  */
 
 const pool = require('../db');
 const { validarCampos, esFechaValida } = require('../validators/carga');
 const { registrarCambioEstado } = require('../services/registrarCambioEstado');
+const { notificarCargaNueva } = require('../services/notificaciones');
 const {
     ESTADOS,
     ESTADOS_VALIDOS,
@@ -183,6 +184,10 @@ const crearCarga = async (req, res) => {
             client
         );
 
+        // Aviso a los camioneros disponibles (HU 12). Dentro de la transacción:
+        // si el alta se deshace, nadie recibe el aviso de una carga que no existe.
+        await notificarCargaNueva(cargaCreada.id_carga, client);
+
         await client.query('COMMIT');
 
         return res.status(201).json(cargaCreada);
@@ -306,7 +311,8 @@ const obtenerCarga = async (req, res) => {
                     -- un Date de JS corrido por la zona horaria local.
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
                     c.observaciones,
-                    c.estado_actual
+                    c.estado_actual,
+                    c.id_camionero_asignado
              FROM CARGA c${JOIN_UBICACION}
              WHERE c.id_carga = $1`,
             [idCarga]
@@ -321,7 +327,12 @@ const obtenerCarga = async (req, res) => {
         // Misma regla que en el listado (HU 3): si al camionero no se le muestra
         // una carga que no está disponible, tampoco puede abrirla escribiendo la
         // URL a mano. Se responde 404 y no 403 para no confirmarle que existe.
-        if (req.usuario?.rol === 'camionero' && carga.estado_actual !== ESTADOS.DISPONIBLE) {
+        //
+        // La excepción es la carga que tiene asignada: es su viaje, y los avisos
+        // de la HU 12 lo traen hasta acá cuando la asignan o le cambian el estado.
+        const esCamioneroAjeno =
+            req.usuario?.rol === 'camionero' && carga.id_camionero_asignado !== req.usuario.id;
+        if (esCamioneroAjeno && carga.estado_actual !== ESTADOS.DISPONIBLE) {
             return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
         }
 

@@ -4,6 +4,23 @@ API del sistema de gestión de cargas. Node + Express + PostgreSQL.
 
 ---
 
+## Actualizar la base con las notificaciones (HU 12)
+
+**Una vez, cuando traigas esta rama.** Sin la tabla nueva, dar de alta una
+carga o cambiarle el estado falla con `relation "notificacion" does not exist`:
+los dos guardan un aviso en la misma transacción.
+
+```bash
+psql -d transporte_klein_db -f migrations/002_notificaciones.sql
+```
+
+Sólo agrega la tabla `NOTIFICACION`: no toca ni borra nada de lo que ya tenés.
+Si todavía no corriste la migración del catálogo geográfico, corré esa primero
+(la sección que sigue). Si armás la base de cero, `script_tablas.sql` ya trae
+la tabla y no hace falta ninguna migración.
+
+---
+
 ## Actualizar la base con el catálogo geográfico
 
 **Esto hay que correrlo una vez cuando traigas esta rama.** El origen y el
@@ -72,6 +89,36 @@ servidor no arranca sin él. Para generar uno:
 ```bash
 openssl rand -base64 32
 ```
+
+---
+
+## Notificaciones (HU 12)
+
+El sistema deja un aviso en la tabla `NOTIFICACION` ante tres eventos:
+
+| Evento | Quién lo recibe |
+|---|---|
+| Alta de una carga | Los camioneros con disponibilidad y la cuenta activa |
+| Cambio de estado | El administrador que creó la carga y el camionero asignado, salvo quien hizo el cambio |
+| Asignación (HU 6) | El camionero elegido, el administrador que asignó y los postulados que quedaron afuera |
+
+Los avisos los arma `src/services/notificaciones.js`, dentro de la misma
+transacción que el hecho que los origina. El de cambio de estado se dispara
+desde `registrarCambioEstado`, así que cualquier endpoint que registre una
+transición en la bitácora avisa solo.
+
+La asignación todavía no está en `develop`. Cuando entre, su endpoint tiene que
+llamar a `notificarAsignacion(idCarga, idCamionero, idAdmin, idsRechazados, client)`
+con el `client` de su transacción.
+
+| Endpoint | Qué hace |
+|---|---|
+| `GET /notificaciones` | Las del usuario del token, la más nueva primero (100 como máximo). Con `?solo_no_leidas=true`, sólo las que faltan leer. |
+| `PUT /notificaciones/:id/leida` | Marca una como leída. Si es de otro usuario responde 404, igual que si no existiera. |
+
+**El contador de no leídas se actualiza consultando `GET /notificaciones` cada
+30 segundos**, no porque el servidor lo empuje. Es una decisión, no una
+omisión: para el alcance del proyecto alcanza, y evita sumar websockets.
 
 ---
 

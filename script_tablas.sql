@@ -142,6 +142,31 @@ CREATE TABLE ESTADO_CARGA (
 
 
 -- ============================================================
+-- NOTIFICACION — avisos del sistema a cada usuario (HU 12):
+-- carga nueva, asignación y cambios de estado.
+-- Leerla no la borra: `leida` sólo cambia su estado, así queda
+-- constancia de qué se le avisó a quién y cuándo.
+-- ============================================================
+CREATE TABLE NOTIFICACION (
+    id_notificacion SERIAL PRIMARY KEY,
+    -- Destinatario. ON DELETE CASCADE por el mismo motivo que la
+    -- bitácora: un aviso sin destinatario no tiene a quién mostrarse.
+    id_usuario INTEGER NOT NULL REFERENCES USUARIO(id_usuario) ON DELETE CASCADE,
+    -- 'carga_nueva', 'cambio_estado', 'carga_asignada', ... La lista
+    -- completa está en src/services/notificaciones.js.
+    tipo_evento VARCHAR(40) NOT NULL,
+    -- El texto se guarda ya armado: cuenta lo que pasó en ese momento,
+    -- aunque después la carga se edite.
+    contenido TEXT NOT NULL,
+    -- Carga a la que se refiere, para ir al detalle desde el aviso.
+    -- NULL queda para avisos que no sean de una carga puntual.
+    id_carga INTEGER REFERENCES CARGA(id_carga) ON DELETE CASCADE,
+    leida BOOLEAN NOT NULL DEFAULT FALSE,
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- ============================================================
 -- Triggers de actualizado_en.
 -- Postgres no actualiza ninguna columna solo: sin esto, actualizado_en
 -- se queda para siempre con la fecha del alta. HU 1.2 pide explícitamente
@@ -186,3 +211,8 @@ CREATE INDEX idx_localidad_provincia_nombre ON LOCALIDAD (id_provincia, nombre);
 
 -- La bitácora siempre se pide por carga y ordenada por fecha (HU 8).
 CREATE INDEX idx_estado_carga_carga_tiempo ON ESTADO_CARGA (id_carga, marca_tiempo);
+
+-- Las notificaciones siempre se piden por usuario, a veces sólo las no
+-- leídas, y de la más nueva a la más vieja (HU 12). El contador de la barra
+-- superior hace esa consulta cada medio minuto por cada usuario conectado.
+CREATE INDEX idx_notificacion_usuario_leida_fecha ON NOTIFICACION (id_usuario, leida, creado_en);

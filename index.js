@@ -6,6 +6,7 @@ const authControllers = require('./src/controllers/authControllers');
 const usuarioControllers = require('./src/controllers/usuarioControllers');
 const cargaControllers = require('./src/controllers/cargaControllers');
 const geografiaControllers = require('./src/controllers/geografiaControllers');
+const notificacionControllers = require('./src/controllers/notificacionControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
 const app = express();
@@ -42,6 +43,11 @@ app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialC
 app.put('/cargas/:id', verifyToken, requireRol('administrador'), cargaControllers.actualizarCarga);
 app.patch('/cargas/:id/estado', verifyToken, requireRol('administrador'), cargaControllers.cambiarEstadoCarga);
 app.patch('/cargas/:id/cancelar', verifyToken, requireRol('administrador'), cargaControllers.cancelarCarga);
+
+// Notificaciones (HU 12). Sin `requireRol`: administradores y camioneros
+// reciben avisos, y cada uno consulta y marca sólo los suyos.
+app.get('/notificaciones', verifyToken, notificacionControllers.listarNotificaciones);
+app.put('/notificaciones/:id/leida', verifyToken, notificacionControllers.marcarNotificacionLeida);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
