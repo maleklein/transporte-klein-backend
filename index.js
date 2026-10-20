@@ -7,6 +7,8 @@ const usuarioControllers = require('./src/controllers/usuarioControllers');
 const cargaControllers = require('./src/controllers/cargaControllers');
 const geografiaControllers = require('./src/controllers/geografiaControllers');
 const notificacionControllers = require('./src/controllers/notificacionControllers');
+const postulacionControllers = require('./src/controllers/postulacionControllers');
+const asignacionControllers = require('./src/controllers/asignacionControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
 const app = express();
@@ -43,6 +45,12 @@ app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialC
 app.put('/cargas/:id', verifyToken, requireRol('administrador'), cargaControllers.actualizarCarga);
 app.patch('/cargas/:id/estado', verifyToken, requireRol('administrador'), cargaControllers.cambiarEstadoCarga);
 app.patch('/cargas/:id/cancelar', verifyToken, requireRol('administrador'), cargaControllers.cancelarCarga);
+
+// Postulaciones (HU 4)
+app.post('/cargas/:id/postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.crearPostulacion);
+app.get('/postulaciones/mis-postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.obtenerMisPostulaciones);
+// HU 6 - Asignar carga a camionero
+app.post('/asignaciones', verifyToken, requireRol('administrador'), asignacionControllers.asignarCamionero);
 
 // Notificaciones (HU 12). Sin `requireRol`: administradores y camioneros
 // reciben avisos, y cada uno consulta y marca sólo los suyos.
