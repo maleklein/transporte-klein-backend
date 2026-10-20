@@ -17,6 +17,7 @@
  */
 
 const { ESTADOS, esCorreccion } = require('../domain/estadosCarga');
+const { COLUMNAS_UBICACION, JOIN_UBICACION } = require('./ubicacionCarga');
 
 /** Tipos de evento, tal como quedan en `NOTIFICACION.tipo_evento`. */
 const TIPOS_NOTIFICACION = Object.freeze({
@@ -52,8 +53,8 @@ const etiquetaEstado = (estado) => ETIQUETAS_ESTADO[estado] ?? estado;
  * partes y los datos que se nombran en el texto.
  *
  * Origen y destino salen con el mismo formato que en las pantallas
- * (`COLUMNAS_UBICACION` en cargaControllers.js): "Rosario, Santa Fe", pero
- * "Córdoba" a secas cuando la localidad se llama igual que su provincia.
+ * (`COLUMNAS_UBICACION`): "Rosario, Santa Fe", pero "Córdoba" a secas cuando
+ * la localidad se llama igual que su provincia.
  *
  * @param {number} idCarga - id de la carga.
  * @param {import('pg').PoolClient} client - client de la transacción en curso.
@@ -63,16 +64,8 @@ const leerCarga = async (idCarga, client) => {
     const resultado = await client.query(
         `SELECT c.id_admin_creador, c.id_camionero_asignado,
                 c.tipo_carga, c.peso_kg,
-                TO_CHAR(c.fecha, 'DD/MM/YYYY') AS fecha,
-                CASE WHEN lo.nombre = po.nombre THEN lo.nombre
-                     ELSE lo.nombre || ', ' || po.nombre END AS origen,
-                CASE WHEN ld.nombre = pd.nombre THEN ld.nombre
-                     ELSE ld.nombre || ', ' || pd.nombre END AS destino
-         FROM CARGA c
-         JOIN LOCALIDAD lo ON lo.id_localidad = c.id_localidad_origen
-         JOIN PROVINCIA po ON po.id_provincia = lo.id_provincia
-         JOIN LOCALIDAD ld ON ld.id_localidad = c.id_localidad_destino
-         JOIN PROVINCIA pd ON pd.id_provincia = ld.id_provincia
+                TO_CHAR(c.fecha, 'DD/MM/YYYY') AS fecha,${COLUMNAS_UBICACION}
+         FROM CARGA c${JOIN_UBICACION}
          WHERE c.id_carga = $1`,
         [idCarga]
     );
