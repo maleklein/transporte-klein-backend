@@ -11,6 +11,7 @@ const { COLUMNAS_UBICACION, JOIN_UBICACION } = require('../services/ubicacionCar
 const {
     ESTADOS,
     ESTADOS_VALIDOS,
+    ESTADOS_ABIERTOS,
     esEstadoValido,
     transicionesDesde,
     puedeTransicionar,
@@ -181,7 +182,9 @@ const crearCarga = async (req, res) => {
  * `destino=50%` matcheaba cualquier cosa.
  *
  * Mismo patrón que `listarUsuarios`: el filtro que no vino se pasa como '' y la
- * condición `$n = '' OR ...` queda siempre verdadera, así no descarta filas.
+ * condición `$n = '' OR ...` queda siempre verdadera, así no descarta filas. El
+ * de estado va como lista, y NULL si no vino, porque al camionero se lo filtra
+ * por dos estados a la vez.
  *
  * Devuelve los datos que usa el front: los que muestra cada fila del listado más
  * `observaciones`, que la pantalla de detalle enseña como "Descripción" (HU 2.5
@@ -213,15 +216,20 @@ const listarCargas = async (req, res) => {
         return res.status(400).json({ message: "El filtro 'destino_localidad' debe ser un id de localidad válido" });
     }
 
-    let filtroEstado = estado ? String(estado).trim() : '';
+    const filtroEstado = estado ? String(estado).trim() : '';
 
-    // HU 3: al camionero sólo se le muestran las cargas en "disponible", que son
-    // a las que se puede postular. El filtro de estado que mande se ignora a
-    // propósito — no es un capricho de la interfaz, es la regla del negocio, y
-    // si dependiera del query param alcanzaría con editar la URL para ver todo.
+    // HU 3: al camionero sólo se le muestran las cargas a las que se puede
+    // postular: las disponibles y las pendientes, que siguen recibiendo
+    // postulaciones hasta que se asignan (HU 4). El filtro de estado que mande
+    // se ignora a propósito — no es un capricho de la interfaz, es la regla del
+    // negocio, y si dependiera del query param alcanzaría con editar la URL
+    // para ver todo.
     const esCamionero = req.usuario?.rol === 'camionero';
+    let estadosVisibles = null;
     if (esCamionero) {
-        filtroEstado = ESTADOS.DISPONIBLE;
+        estadosVisibles = ESTADOS_ABIERTOS;
+    } else if (filtroEstado) {
+        estadosVisibles = [filtroEstado];
     }
 
     try {
@@ -234,12 +242,12 @@ const listarCargas = async (req, res) => {
                     c.observaciones,
                     c.estado_actual
              FROM CARGA c${JOIN_UBICACION}
-             WHERE ($1 = '' OR c.estado_actual = $1)
+             WHERE ($1::text[] IS NULL OR c.estado_actual = ANY($1::text[]))
                AND ($2 = '' OR c.fecha = $2::date)
                AND ($3 = '' OR pd.id_provincia = $3)
                AND ($4 = '' OR c.id_localidad_destino = $4)
              ORDER BY c.fecha, c.id_carga`,
-            [filtroEstado, filtroFecha, filtroProvincia, filtroLocalidad]
+            [estadosVisibles, filtroFecha, filtroProvincia, filtroLocalidad]
         );
 
         return res.status(200).json(resultado.rows);
@@ -290,14 +298,15 @@ const obtenerCarga = async (req, res) => {
         const carga = resultado.rows[0];
 
         // Misma regla que en el listado (HU 3): si al camionero no se le muestra
-        // una carga que no está disponible, tampoco puede abrirla escribiendo la
-        // URL a mano. Se responde 404 y no 403 para no confirmarle que existe.
+        // una carga a la que ya no se puede postular, tampoco puede abrirla
+        // escribiendo la URL a mano. Se responde 404 y no 403 para no
+        // confirmarle que existe.
         //
         // La excepción es la carga que tiene asignada: es su viaje, y los avisos
         // de la HU 12 lo traen hasta acá cuando la asignan o le cambian el estado.
         const esCamioneroAjeno =
             req.usuario?.rol === 'camionero' && carga.id_camionero_asignado !== req.usuario.id;
-        if (esCamioneroAjeno && carga.estado_actual !== ESTADOS.DISPONIBLE) {
+        if (esCamioneroAjeno && !ESTADOS_ABIERTOS.includes(carga.estado_actual)) {
             return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
         }
 

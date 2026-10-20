@@ -36,8 +36,8 @@ app.get('/localidades', verifyToken, geografiaControllers.listarLocalidades);
 // Rutas de cargas.
 // Escribir (alta, edición, cambio de estado) es exclusivo del administrador.
 // Consultar queda abierto a cualquier usuario logueado, pero lo que ve depende
-// del rol: al camionero el controlador le devuelve sólo las cargas en
-// "disponible" (HU 3), que son a las que se puede postular.
+// del rol: al camionero el controlador le devuelve sólo las cargas disponibles
+// o pendientes (HU 3), que son a las que se puede postular.
 app.post('/cargas', verifyToken, requireRol('administrador'), cargaControllers.crearCarga);
 app.get('/cargas', verifyToken, cargaControllers.listarCargas);
 app.get('/cargas/:id', verifyToken, cargaControllers.obtenerCarga);
@@ -46,8 +46,10 @@ app.put('/cargas/:id', verifyToken, requireRol('administrador'), cargaController
 app.patch('/cargas/:id/estado', verifyToken, requireRol('administrador'), cargaControllers.cambiarEstadoCarga);
 app.patch('/cargas/:id/cancelar', verifyToken, requireRol('administrador'), cargaControllers.cancelarCarga);
 
-// Postulaciones (HU 4)
+// Postulaciones (HU 4). El camionero se postula y sigue las suyas; el
+// administrador ve quiénes se postularon a cada carga para asignarla (HU 6).
 app.post('/cargas/:id/postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.crearPostulacion);
+app.get('/cargas/:id/postulaciones', verifyToken, requireRol('administrador'), postulacionControllers.listarPostulantes);
 app.get('/postulaciones/mis-postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.obtenerMisPostulaciones);
 // HU 6 - Asignar carga a camionero
 app.post('/asignaciones', verifyToken, requireRol('administrador'), asignacionControllers.asignarCamionero);
