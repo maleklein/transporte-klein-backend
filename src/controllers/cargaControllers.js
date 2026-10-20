@@ -481,9 +481,17 @@ const actualizarCarga = async (req, res) => {
  * fallara el segundo, no puede quedar una carga que cambió de estado sin el
  * registro de quién la cambió, que es justamente lo que la bitácora garantiza.
  *
+ * Con la asignación (HU 6) hay dos transiciones que no son sólo un estado:
+ * - De "pendiente" a "aceptada" no se pasa por acá: se llega asignándole la
+ *   carga a un camionero postulado (`POST /cargas/:id/asignar`). Hacerlo a
+ *   mano dejaría un viaje confirmado sin camionero.
+ * - Volver de "aceptada" a "pendiente" deshace la asignación: la carga se
+ *   queda sin camionero y todas sus postulaciones vuelven a pendiente, para
+ *   poder asignarla de nuevo. El camionero que la tenía recibe el aviso.
+ *
  * Respuestas: 200 con la carga actualizada · 400 si el id o el estado pedido
  * no son válidos · 404 si no existe la carga · 409 si la transición no está
- * permitida · 500 ante un error inesperado.
+ * permitida o hay que hacerla asignando · 500 ante un error inesperado.
  *
  * @param {import('express').Request} req - request de Express. Body: `{ estado }`.
  * @param {import('express').Response} res - response de Express.
@@ -546,6 +554,13 @@ const cambiarEstadoCarga = async (req, res) => {
             });
         }
 
+        if (estadoActual === ESTADOS.PENDIENTE && estadoNuevo === ESTADOS.ACEPTADA) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                message: "Para pasar a 'aceptada' hay que asignarle la carga a uno de los camioneros postulados.",
+            });
+        }
+
         // El CTE no es opcional acá: la pantalla de detalle se redibuja con lo
         // que devuelve este endpoint, así que si le faltaran los JOIN al
         // catálogo se quedaría sin la ruta después de cada cambio de estado.
@@ -566,6 +581,20 @@ const cambiarEstadoCarga = async (req, res) => {
         );
 
         await registrarCambioEstado(idCarga, estadoActual, estadoNuevo, req.usuario.id, client);
+
+        // Deshacer la asignación va después de la bitácora a propósito: así el
+        // camionero todavía figura como parte de la carga y le llega el aviso
+        // de que la carga volvió a pendiente.
+        if (estadoActual === ESTADOS.ACEPTADA && estadoNuevo === ESTADOS.PENDIENTE) {
+            await client.query(
+                'UPDATE CARGA SET id_camionero_asignado = NULL WHERE id_carga = $1',
+                [idCarga]
+            );
+            await client.query(
+                "UPDATE POSTULACION SET estado = 'pendiente' WHERE id_carga = $1",
+                [idCarga]
+            );
+        }
 
         await client.query('COMMIT');
 

@@ -51,8 +51,8 @@ app.patch('/cargas/:id/cancelar', verifyToken, requireRol('administrador'), carg
 app.post('/cargas/:id/postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.crearPostulacion);
 app.get('/cargas/:id/postulaciones', verifyToken, requireRol('administrador'), postulacionControllers.listarPostulantes);
 app.get('/postulaciones/mis-postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.obtenerMisPostulaciones);
-// HU 6 - Asignar carga a camionero
-app.post('/asignaciones', verifyToken, requireRol('administrador'), asignacionControllers.asignarCamionero);
+// HU 6 - Asignar carga a camionero: elige entre los postulados de esa carga.
+app.post('/cargas/:id/asignar', verifyToken, requireRol('administrador'), asignacionControllers.asignarCamionero);
 
 // Notificaciones (HU 12). Sin `requireRol`: administradores y camioneros
 // reciben avisos, y cada uno consulta y marca sólo los suyos.

@@ -194,8 +194,7 @@ const notificarCambioEstado = async (idCarga, estadoAnterior, estadoNuevo, idAct
 };
 
 /**
- * Avisa de una asignación. Es para el endpoint de asignación de la HU 6, que
- * todavía no está en develop.
+ * Avisa de una asignación. La llama `POST /cargas/:id/asignar` (HU 6).
  *
  * Al camionero elegido le llegan los datos del viaje; al administrador que
  * asignó, la confirmación; y a los que se habían postulado y quedaron afuera,
@@ -203,14 +202,12 @@ const notificarCambioEstado = async (idCarga, estadoAnterior, estadoNuevo, idAct
  * es quien actualiza las postulaciones: así este servicio no depende de cómo
  * esté armada la tabla POSTULACION.
  *
- * Tiene que correr dentro de la transacción de la asignación, con un `client`
- * de `pool.connect()` como en `cambiarEstadoCarga`. Con `pool.query('BEGIN')`
- * cada consulta puede salir por una conexión distinta del pool, y entonces no
- * hay transacción que deshacer si algo falla.
+ * Corre dentro de la transacción de la asignación, con su `client`.
  *
  * El paso de "pendiente" a "aceptada" que implica la asignación avisa aparte,
- * siempre que el endpoint lo registre con `registrarCambioEstado`: este aviso
- * es el que lleva los datos del viaje.
+ * desde `registrarCambioEstado`, al resto de las partes. El endpoint lo
+ * registra antes de asignar el camionero para que a él no le lleguen dos
+ * avisos: el suyo es este, que trae los datos del viaje.
  *
  * @param {number} idCarga - la carga asignada.
  * @param {number} idCamionero - el camionero elegido.
