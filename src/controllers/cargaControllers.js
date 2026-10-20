@@ -664,14 +664,18 @@ const cancelarCarga = async (req, res) => {
         if (!puedeTransicionar(estadoActual, ESTADOS.CANCELADA)) {
             await client.query('ROLLBACK');
 
-            // En viaje y entregada tienen cada uno su propio motivo (HU 2.4);
-            // el resto (hoy sólo "aceptada") cae en el mensaje genérico de la
+            // En viaje y entregada tienen cada uno su propio motivo (HU 2.4), y
+            // aceptada también: con la asignación (HU 6) es el estado de toda
+            // carga asignada, y la salida es volverla a pendiente, que deshace
+            // la asignación. Cualquier otro cae en el mensaje genérico de la
             // regla "sólo se cancela desde disponible o pendiente".
-            const motivo = estadoActual === ESTADOS.EN_VIAJE
-                ? 'La carga ya está en viaje: no se puede cancelar, sólo registrar su entrega.'
-                : estadoActual === ESTADOS.ENTREGADA
-                    ? 'La carga ya fue entregada: no se puede cancelar un hecho que ya ocurrió.'
-                    : `No se puede cancelar una carga en estado '${estadoActual}'. Sólo se puede cancelar desde 'disponible' o 'pendiente'.`;
+            const motivo = estadoActual === ESTADOS.ACEPTADA
+                ? 'La carga ya tiene un camionero asignado: para cancelarla, primero volvela a pendiente.'
+                : estadoActual === ESTADOS.EN_VIAJE
+                    ? 'La carga ya está en viaje: no se puede cancelar, sólo registrar su entrega.'
+                    : estadoActual === ESTADOS.ENTREGADA
+                        ? 'La carga ya fue entregada: no se puede cancelar un hecho que ya ocurrió.'
+                        : `No se puede cancelar una carga en estado '${estadoActual}'. Sólo se puede cancelar desde 'disponible' o 'pendiente'.`;
 
             return res.status(409).json({ message: motivo });
         }
