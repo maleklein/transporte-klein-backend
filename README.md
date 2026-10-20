@@ -4,6 +4,24 @@ API del sistema de gestión de cargas. Node + Express + PostgreSQL.
 
 ---
 
+## Actualizar la base con las postulaciones (HU 4 y HU 6)
+
+**Una vez, cuando traigas esta rama.** Sin la tabla nueva, postularse, ver los
+postulados y asignar fallan con `relation "postulacion" does not exist`.
+
+```bash
+psql -d transporte_klein_db -f migrations/003_postulaciones.sql
+```
+
+Sólo agrega la tabla `POSTULACION`: no toca ni borra nada de lo que ya tenés.
+Necesita las dos migraciones anteriores (notificaciones y catálogo, las
+secciones que siguen): si te falta alguna, corré esas primero. Si para probar la
+rama de Tomás habías creado `POSTULACION` a mano, borrala antes
+(`DROP TABLE POSTULACION;`). Si armás la base de cero, `script_tablas.sql` ya
+trae la tabla.
+
+---
+
 ## Actualizar la base con las notificaciones (HU 12)
 
 **Una vez, cuando traigas esta rama.** Sin la tabla nueva, dar de alta una
@@ -107,9 +125,8 @@ transacción que el hecho que los origina. El de cambio de estado se dispara
 desde `registrarCambioEstado`, así que cualquier endpoint que registre una
 transición en la bitácora avisa solo.
 
-La asignación todavía no está en `develop`. Cuando entre, su endpoint tiene que
-llamar a `notificarAsignacion(idCarga, idCamionero, idAdmin, idsRechazados, client)`
-con el `client` de su transacción.
+El de asignación lo dispara `POST /cargas/:id/asignar`, con
+`notificarAsignacion(idCarga, idCamionero, idAdmin, idsRechazados, client)`.
 
 | Endpoint | Qué hace |
 |---|---|
@@ -119,6 +136,31 @@ con el `client` de su transacción.
 **El contador de no leídas se actualiza consultando `GET /notificaciones` cada
 30 segundos**, no porque el servidor lo empuje. Es una decisión, no una
 omisión: para el alcance del proyecto alcanza, y evita sumar websockets.
+
+---
+
+## Postulaciones y asignación (HU 4 y HU 6)
+
+Una carga recibe postulaciones mientras está **disponible** o **pendiente**, y
+eso es lo que ve el camionero en el listado:
+
+1. **Disponible**: publicada, todavía sin postulados.
+2. **Pendiente**: la primera postulación la pasa a este estado, con el camionero
+   como actor en la bitácora. Las que llegan después no la mueven.
+3. **Aceptada**: el administrador la asigna a uno de los postulados. La
+   postulación elegida pasa a `aceptada` y las demás a `rechazada`.
+
+De pendiente a aceptada no se pasa con `PATCH /cargas/:id/estado`: se llega
+asignando, porque si no quedaría un viaje confirmado sin camionero. Volver de
+aceptada a pendiente sí se puede, y deshace la asignación: la carga se queda sin
+camionero y todas sus postulaciones vuelven a `pendiente`.
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `POST /cargas/:id/postulaciones` | camionero | Se postula a la carga. 409 si ya se postuló o si la carga ya no recibe postulaciones. |
+| `GET /cargas/:id/postulaciones` | administrador | Los postulados, con vehículo, capacidad, ubicación y disponibilidad. |
+| `GET /postulaciones/mis-postulaciones` | camionero | Las suyas, la más nueva primero, con el estado de la carga. |
+| `POST /cargas/:id/asignar` | administrador | Asigna la carga a un postulado: `{ "id_camionero": 7 }`. |
 
 ---
 
@@ -132,7 +174,7 @@ scripts/crear-admin.js       primer administrador (POST /usuarios pide ser admin
 scripts/sembrar-localidades.js   catálogo geográfico desde la API georef
 scripts/localidades.json     respaldo del catálogo, para sembrar sin internet
 src/controllers/             un archivo por módulo
-src/domain/estadosCarga.js   máquina de estados de una carga
+src/domain/estadosCarga.js   máquina de estados de una carga y qué estados reciben postulaciones
 src/middlewares/auth.js      verifyToken y requireRol
 src/services/                lógica compartida entre controladores
 src/validators/              validación de los datos que llegan por body
