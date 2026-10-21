@@ -110,8 +110,11 @@ CREATE TABLE CARGA (
     kilometros_estimados NUMERIC,
     costo_estimado NUMERIC,
     ganancia_estimada NUMERIC,
-    -- Estado vigente. Nace 'disponible' y HU 2.3 lo pasa a 'publicada'.
-    -- El historial completo de transiciones va en ESTADO_CARGA.
+    -- Estado vigente. Nace 'disponible' (ESTADO_INICIAL en estadosCarga.js).
+    -- "publicada" no es un estado real: no está en la máquina de estados ni
+    -- en la base, sólo en un criterio de aceptación del SRS que no se siguió
+    -- (ver la nota en src/domain/estadosCarga.js). El historial completo de
+    -- transiciones va en ESTADO_CARGA.
     estado_actual VARCHAR(30) NOT NULL DEFAULT 'disponible',
     -- Administrador responsable del alta. NOT NULL a propósito: toda
     -- carga tiene que poder rastrearse hasta quién la creó.
@@ -211,6 +214,10 @@ CREATE INDEX idx_localidad_provincia_nombre ON LOCALIDAD (id_provincia, nombre);
 
 -- La bitácora siempre se pide por carga y ordenada por fecha (HU 8).
 CREATE INDEX idx_estado_carga_carga_tiempo ON ESTADO_CARGA (id_carga, marca_tiempo);
+
+-- El panel de métricas (HU 13) recorre la bitácora completa filtrando sólo
+-- por fecha, sin pasar por una carga puntual.
+CREATE INDEX idx_estado_carga_tiempo ON ESTADO_CARGA (marca_tiempo);
 
 -- Las notificaciones siempre se piden por usuario, a veces sólo las no
 -- leídas, y de la más nueva a la más vieja (HU 12). El contador de la barra
