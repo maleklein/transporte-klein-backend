@@ -7,6 +7,7 @@ const usuarioControllers = require('./src/controllers/usuarioControllers');
 const cargaControllers = require('./src/controllers/cargaControllers');
 const geografiaControllers = require('./src/controllers/geografiaControllers');
 const notificacionControllers = require('./src/controllers/notificacionControllers');
+const metricasControllers = require('./src/controllers/metricasControllers');
 const postulacionControllers = require('./src/controllers/postulacionControllers');
 const asignacionControllers = require('./src/controllers/asignacionControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
@@ -58,6 +59,9 @@ app.post('/cargas/:id/asignar', verifyToken, requireRol('administrador'), asigna
 // reciben avisos, y cada uno consulta y marca sólo los suyos.
 app.get('/notificaciones', verifyToken, notificacionControllers.listarNotificaciones);
 app.put('/notificaciones/:id/leida', verifyToken, notificacionControllers.marcarNotificacionLeida);
+
+// Panel de métricas (HU 13): sólo para administradores.
+app.get('/metricas', verifyToken, requireRol('administrador'), metricasControllers.obtenerMetricas);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
