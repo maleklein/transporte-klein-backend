@@ -145,6 +145,24 @@ CREATE TABLE ESTADO_CARGA (
 
 
 -- ============================================================
+-- POSTULACION — un camionero que pide llevar una carga (HU 4).
+-- Relación muchos a muchos entre CAMIONERO y CARGA: el
+-- administrador elige entre los postulados al asignar (HU 6).
+-- ============================================================
+CREATE TABLE POSTULACION (
+    id_postulacion SERIAL PRIMARY KEY,
+    id_carga INTEGER NOT NULL REFERENCES CARGA(id_carga) ON DELETE CASCADE,
+    id_camionero INTEGER NOT NULL REFERENCES CAMIONERO(id_usuario) ON DELETE CASCADE,
+    -- 'pendiente' hasta que se asigna la carga; ahí pasa a 'aceptada' la
+    -- del camionero elegido y a 'rechazada' la de los demás.
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+    fecha_postulacion TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Un camionero se postula una sola vez a cada carga.
+    UNIQUE (id_carga, id_camionero)
+);
+
+
+-- ============================================================
 -- NOTIFICACION — avisos del sistema a cada usuario (HU 12):
 -- carga nueva, asignación y cambios de estado.
 -- Leerla no la borra: `leida` sólo cambia su estado, así queda
@@ -218,6 +236,11 @@ CREATE INDEX idx_estado_carga_carga_tiempo ON ESTADO_CARGA (id_carga, marca_tiem
 -- El panel de métricas (HU 13) recorre la bitácora completa filtrando sólo
 -- por fecha, sin pasar por una carga puntual.
 CREATE INDEX idx_estado_carga_tiempo ON ESTADO_CARGA (marca_tiempo);
+
+-- "Mis viajes" pide las postulaciones de un camionero, la más nueva primero.
+-- Las de una carga (lo que mira el administrador al asignar) ya las cubre el
+-- índice que arma el UNIQUE (id_carga, id_camionero).
+CREATE INDEX idx_postulacion_camionero_fecha ON POSTULACION (id_camionero, fecha_postulacion);
 
 -- Las notificaciones siempre se piden por usuario, a veces sólo las no
 -- leídas, y de la más nueva a la más vieja (HU 12). El contador de la barra

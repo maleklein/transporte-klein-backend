@@ -1,9 +1,9 @@
--- 003 — Índices de la bitácora para métricas (HU 13).
+-- 004 — Índices de la bitácora para métricas (HU 13).
 --
 -- Para una base que YA existe. Si estás armando la base de cero no corras esto:
 -- `script_tablas.sql` ya trae los dos índices.
 --
---   psql -d transporte_klein_db -f migrations/003_indices_metricas.sql
+--   psql -d transporte_klein_db -f migrations/004_indices_metricas.sql
 --
 -- Sólo agrega índices: no toca ni borra ningún dato.
 --

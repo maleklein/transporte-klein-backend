@@ -7,9 +7,11 @@ const pool = require('../db');
 const { validarCampos, esFechaValida } = require('../validators/carga');
 const { registrarCambioEstado } = require('../services/registrarCambioEstado');
 const { notificarCargaNueva } = require('../services/notificaciones');
+const { COLUMNAS_UBICACION, JOIN_UBICACION } = require('../services/ubicacionCarga');
 const {
     ESTADOS,
     ESTADOS_VALIDOS,
+    ESTADOS_ABIERTOS,
     esEstadoValido,
     transicionesDesde,
     puedeTransicionar,
@@ -25,42 +27,6 @@ const ESTADO_INICIAL = ESTADOS.DISPONIBLE;
  * carga cancelada tampoco se edita: no hay viaje que seguir planificando.
  */
 const ESTADOS_BLOQUEADOS_EDICION = [ESTADOS.EN_VIAJE, ESTADOS.ENTREGADA, ESTADOS.CANCELADA];
-
-/**
- * Columnas de origen y destino, resueltas contra el catálogo geográfico.
- *
- * Además de los ids y los nombres por separado —que es lo que necesitan los
- * selectores del formulario— arma un `origen` y un `destino` ya listos para
- * mostrar. Así las pantallas que sólo los muestran (el detalle, las tarjetas
- * del listado) siguen leyendo el mismo campo de siempre y no hubo que tocarlas.
- *
- * El CASE evita el "Santa Fe, Santa Fe" de las capitales que se llaman igual
- * que su provincia, y el caso extremo de CABA, que repetiría el nombre entero.
- *
- * Se define una sola vez porque lo usan las cinco consultas del módulo: si
- * alguna se quedara sin estos campos, la pantalla de detalle se quedaría sin
- * la ruta después de esa operación.
- */
-const COLUMNAS_UBICACION = `
-                    c.id_localidad_origen  AS origen_id,
-                    lo.nombre              AS origen_localidad,
-                    po.id_provincia        AS origen_provincia_id,
-                    po.nombre              AS origen_provincia,
-                    CASE WHEN lo.nombre = po.nombre THEN lo.nombre
-                         ELSE lo.nombre || ', ' || po.nombre END AS origen,
-                    c.id_localidad_destino AS destino_id,
-                    ld.nombre              AS destino_localidad,
-                    pd.id_provincia        AS destino_provincia_id,
-                    pd.nombre              AS destino_provincia,
-                    CASE WHEN ld.nombre = pd.nombre THEN ld.nombre
-                         ELSE ld.nombre || ', ' || pd.nombre END AS destino`;
-
-/** Los JOIN que hacen falta para que `COLUMNAS_UBICACION` resuelva. */
-const JOIN_UBICACION = `
-             JOIN LOCALIDAD lo ON lo.id_localidad = c.id_localidad_origen
-             JOIN PROVINCIA po ON po.id_provincia = lo.id_provincia
-             JOIN LOCALIDAD ld ON ld.id_localidad = c.id_localidad_destino
-             JOIN PROVINCIA pd ON pd.id_provincia = ld.id_provincia`;
 
 /**
  * Verifica que las dos localidades del body existan en el catálogo.
@@ -216,7 +182,9 @@ const crearCarga = async (req, res) => {
  * `destino=50%` matcheaba cualquier cosa.
  *
  * Mismo patrón que `listarUsuarios`: el filtro que no vino se pasa como '' y la
- * condición `$n = '' OR ...` queda siempre verdadera, así no descarta filas.
+ * condición `$n = '' OR ...` queda siempre verdadera, así no descarta filas. El
+ * de estado va como lista, y NULL si no vino, porque al camionero se lo filtra
+ * por dos estados a la vez.
  *
  * Devuelve los datos que usa el front: los que muestra cada fila del listado más
  * `observaciones`, que la pantalla de detalle enseña como "Descripción" (HU 2.5
@@ -248,15 +216,20 @@ const listarCargas = async (req, res) => {
         return res.status(400).json({ message: "El filtro 'destino_localidad' debe ser un id de localidad válido" });
     }
 
-    let filtroEstado = estado ? String(estado).trim() : '';
+    const filtroEstado = estado ? String(estado).trim() : '';
 
-    // HU 3: al camionero sólo se le muestran las cargas en "disponible", que son
-    // a las que se puede postular. El filtro de estado que mande se ignora a
-    // propósito — no es un capricho de la interfaz, es la regla del negocio, y
-    // si dependiera del query param alcanzaría con editar la URL para ver todo.
+    // HU 3: al camionero sólo se le muestran las cargas a las que se puede
+    // postular: las disponibles y las pendientes, que siguen recibiendo
+    // postulaciones hasta que se asignan (HU 4). El filtro de estado que mande
+    // se ignora a propósito — no es un capricho de la interfaz, es la regla del
+    // negocio, y si dependiera del query param alcanzaría con editar la URL
+    // para ver todo.
     const esCamionero = req.usuario?.rol === 'camionero';
+    let estadosVisibles = null;
     if (esCamionero) {
-        filtroEstado = ESTADOS.DISPONIBLE;
+        estadosVisibles = ESTADOS_ABIERTOS;
+    } else if (filtroEstado) {
+        estadosVisibles = [filtroEstado];
     }
 
     try {
@@ -269,12 +242,12 @@ const listarCargas = async (req, res) => {
                     c.observaciones,
                     c.estado_actual
              FROM CARGA c${JOIN_UBICACION}
-             WHERE ($1 = '' OR c.estado_actual = $1)
+             WHERE ($1::text[] IS NULL OR c.estado_actual = ANY($1::text[]))
                AND ($2 = '' OR c.fecha = $2::date)
                AND ($3 = '' OR pd.id_provincia = $3)
                AND ($4 = '' OR c.id_localidad_destino = $4)
              ORDER BY c.fecha, c.id_carga`,
-            [filtroEstado, filtroFecha, filtroProvincia, filtroLocalidad]
+            [estadosVisibles, filtroFecha, filtroProvincia, filtroLocalidad]
         );
 
         return res.status(200).json(resultado.rows);
@@ -325,14 +298,15 @@ const obtenerCarga = async (req, res) => {
         const carga = resultado.rows[0];
 
         // Misma regla que en el listado (HU 3): si al camionero no se le muestra
-        // una carga que no está disponible, tampoco puede abrirla escribiendo la
-        // URL a mano. Se responde 404 y no 403 para no confirmarle que existe.
+        // una carga a la que ya no se puede postular, tampoco puede abrirla
+        // escribiendo la URL a mano. Se responde 404 y no 403 para no
+        // confirmarle que existe.
         //
         // La excepción es la carga que tiene asignada: es su viaje, y los avisos
         // de la HU 12 lo traen hasta acá cuando la asignan o le cambian el estado.
         const esCamioneroAjeno =
             req.usuario?.rol === 'camionero' && carga.id_camionero_asignado !== req.usuario.id;
-        if (esCamioneroAjeno && carga.estado_actual !== ESTADOS.DISPONIBLE) {
+        if (esCamioneroAjeno && !ESTADOS_ABIERTOS.includes(carga.estado_actual)) {
             return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
         }
 
@@ -507,9 +481,17 @@ const actualizarCarga = async (req, res) => {
  * fallara el segundo, no puede quedar una carga que cambió de estado sin el
  * registro de quién la cambió, que es justamente lo que la bitácora garantiza.
  *
+ * Con la asignación (HU 6) hay dos transiciones que no son sólo un estado:
+ * - De "pendiente" a "aceptada" no se pasa por acá: se llega asignándole la
+ *   carga a un camionero postulado (`POST /cargas/:id/asignar`). Hacerlo a
+ *   mano dejaría un viaje confirmado sin camionero.
+ * - Volver de "aceptada" a "pendiente" deshace la asignación: la carga se
+ *   queda sin camionero y todas sus postulaciones vuelven a pendiente, para
+ *   poder asignarla de nuevo. El camionero que la tenía recibe el aviso.
+ *
  * Respuestas: 200 con la carga actualizada · 400 si el id o el estado pedido
  * no son válidos · 404 si no existe la carga · 409 si la transición no está
- * permitida · 500 ante un error inesperado.
+ * permitida o hay que hacerla asignando · 500 ante un error inesperado.
  *
  * @param {import('express').Request} req - request de Express. Body: `{ estado }`.
  * @param {import('express').Response} res - response de Express.
@@ -572,6 +554,13 @@ const cambiarEstadoCarga = async (req, res) => {
             });
         }
 
+        if (estadoActual === ESTADOS.PENDIENTE && estadoNuevo === ESTADOS.ACEPTADA) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                message: "Para pasar a 'aceptada' hay que asignarle la carga a uno de los camioneros postulados.",
+            });
+        }
+
         // El CTE no es opcional acá: la pantalla de detalle se redibuja con lo
         // que devuelve este endpoint, así que si le faltaran los JOIN al
         // catálogo se quedaría sin la ruta después de cada cambio de estado.
@@ -592,6 +581,20 @@ const cambiarEstadoCarga = async (req, res) => {
         );
 
         await registrarCambioEstado(idCarga, estadoActual, estadoNuevo, req.usuario.id, client);
+
+        // Deshacer la asignación va después de la bitácora a propósito: así el
+        // camionero todavía figura como parte de la carga y le llega el aviso
+        // de que la carga volvió a pendiente.
+        if (estadoActual === ESTADOS.ACEPTADA && estadoNuevo === ESTADOS.PENDIENTE) {
+            await client.query(
+                'UPDATE CARGA SET id_camionero_asignado = NULL WHERE id_carga = $1',
+                [idCarga]
+            );
+            await client.query(
+                "UPDATE POSTULACION SET estado = 'pendiente' WHERE id_carga = $1",
+                [idCarga]
+            );
+        }
 
         await client.query('COMMIT');
 
@@ -661,14 +664,18 @@ const cancelarCarga = async (req, res) => {
         if (!puedeTransicionar(estadoActual, ESTADOS.CANCELADA)) {
             await client.query('ROLLBACK');
 
-            // En viaje y entregada tienen cada uno su propio motivo (HU 2.4);
-            // el resto (hoy sólo "aceptada") cae en el mensaje genérico de la
+            // En viaje y entregada tienen cada uno su propio motivo (HU 2.4), y
+            // aceptada también: con la asignación (HU 6) es el estado de toda
+            // carga asignada, y la salida es volverla a pendiente, que deshace
+            // la asignación. Cualquier otro cae en el mensaje genérico de la
             // regla "sólo se cancela desde disponible o pendiente".
-            const motivo = estadoActual === ESTADOS.EN_VIAJE
-                ? 'La carga ya está en viaje: no se puede cancelar, sólo registrar su entrega.'
-                : estadoActual === ESTADOS.ENTREGADA
-                    ? 'La carga ya fue entregada: no se puede cancelar un hecho que ya ocurrió.'
-                    : `No se puede cancelar una carga en estado '${estadoActual}'. Sólo se puede cancelar desde 'disponible' o 'pendiente'.`;
+            const motivo = estadoActual === ESTADOS.ACEPTADA
+                ? 'La carga ya tiene un camionero asignado: para cancelarla, primero volvela a pendiente.'
+                : estadoActual === ESTADOS.EN_VIAJE
+                    ? 'La carga ya está en viaje: no se puede cancelar, sólo registrar su entrega.'
+                    : estadoActual === ESTADOS.ENTREGADA
+                        ? 'La carga ya fue entregada: no se puede cancelar un hecho que ya ocurrió.'
+                        : `No se puede cancelar una carga en estado '${estadoActual}'. Sólo se puede cancelar desde 'disponible' o 'pendiente'.`;
 
             return res.status(409).json({ message: motivo });
         }

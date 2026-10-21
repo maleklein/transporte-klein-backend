@@ -4,6 +4,24 @@ API del sistema de gestión de cargas. Node + Express + PostgreSQL.
 
 ---
 
+## Actualizar la base con las postulaciones (HU 4 y HU 6)
+
+**Una vez, cuando traigas esta rama.** Sin la tabla nueva, postularse, ver los
+postulados y asignar fallan con `relation "postulacion" does not exist`.
+
+```bash
+psql -d transporte_klein_db -f migrations/003_postulaciones.sql
+```
+
+Sólo agrega la tabla `POSTULACION`: no toca ni borra nada de lo que ya tenés.
+Necesita las dos migraciones anteriores (notificaciones y catálogo, las
+secciones que siguen): si te falta alguna, corré esas primero. Si para probar la
+rama de Tomás habías creado `POSTULACION` a mano, borrala antes
+(`DROP TABLE POSTULACION;`). Si armás la base de cero, `script_tablas.sql` ya
+trae la tabla.
+
+---
+
 ## Actualizar la base con las notificaciones (HU 12)
 
 **Una vez, cuando traigas esta rama.** Sin la tabla nueva, dar de alta una
@@ -107,9 +125,8 @@ transacción que el hecho que los origina. El de cambio de estado se dispara
 desde `registrarCambioEstado`, así que cualquier endpoint que registre una
 transición en la bitácora avisa solo.
 
-La asignación todavía no está en `develop`. Cuando entre, su endpoint tiene que
-llamar a `notificarAsignacion(idCarga, idCamionero, idAdmin, idsRechazados, client)`
-con el `client` de su transacción.
+El de asignación lo dispara `POST /cargas/:id/asignar`, con
+`notificarAsignacion(idCarga, idCamionero, idAdmin, idsRechazados, client)`.
 
 | Endpoint | Qué hace |
 |---|---|
@@ -189,12 +206,37 @@ una carga nace en `disponible`. Todo se calcula a partir de la bitácora
 | Período de un tramo | Un tramo (de asignación o de entrega) se cuenta dentro de `[fecha_desde, fecha_hasta]` si su evento *final* (`aceptada` o `entregada`, según el tramo) cae en ese rango. El evento de arranque puede ser anterior al período. |
 | Tasa de cumplimiento | `entregadas / (entregadas + canceladas)`, contando las transiciones a esos estados que caen dentro del período. Si ninguna de las dos ocurrió, el resultado es `null`, no `0`: cero no es lo mismo que "sin datos". |
 | Cargas por estado | Cargas cuyo `creado_en` cae en el período, agrupadas por su `estado_actual` **de hoy**, no por el estado que tenían durante el período. Una carga creada en el período y cancelada después aparece como `cancelada`. |
-| Camioneros con al menos un viaje | `COUNT(DISTINCT id_camionero_asignado)` de las cargas con camionero asignado cuya primera transición a `aceptada` cae en el período. **Hoy esto siempre da 0**: la columna `CARGA.id_camionero_asignado` existe desde el esquema original, pero ningún endpoint la escribe todavía — depende de la asignación de HU 6, que no está en `develop`. |
+| Camioneros con al menos un viaje | `COUNT(DISTINCT id_camionero_asignado)` de las cargas con camionero asignado cuya primera transición a `aceptada` cae en el período. `POST /cargas/:id/asignar` (HU 6) es quien hoy escribe `CARGA.id_camionero_asignado`, en la misma operación en la que registra la transición `pendiente` → `aceptada` que usa el tiempo de asignación (ver fila de arriba): no son dos hechos independientes, son la misma asignación. |
 
 Los índices que necesitan estas consultas (`idx_estado_carga_carga_tiempo` e
 `idx_estado_carga_tiempo`, los dos sobre `ESTADO_CARGA`) están en
 `script_tablas.sql`; si tu base ya existía antes de esta HU, corré
-`migrations/003_indices_metricas.sql`.
+`migrations/004_indices_metricas.sql`.
+
+---
+
+## Postulaciones y asignación (HU 4 y HU 6)
+
+Una carga recibe postulaciones mientras está **disponible** o **pendiente**, y
+eso es lo que ve el camionero en el listado:
+
+1. **Disponible**: publicada, todavía sin postulados.
+2. **Pendiente**: la primera postulación la pasa a este estado, con el camionero
+   como actor en la bitácora. Las que llegan después no la mueven.
+3. **Aceptada**: el administrador la asigna a uno de los postulados. La
+   postulación elegida pasa a `aceptada` y las demás a `rechazada`.
+
+De pendiente a aceptada no se pasa con `PATCH /cargas/:id/estado`: se llega
+asignando, porque si no quedaría un viaje confirmado sin camionero. Volver de
+aceptada a pendiente sí se puede, y deshace la asignación: la carga se queda sin
+camionero y todas sus postulaciones vuelven a `pendiente`.
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `POST /cargas/:id/postulaciones` | camionero | Se postula a la carga. 409 si ya se postuló o si la carga ya no recibe postulaciones. |
+| `GET /cargas/:id/postulaciones` | administrador | Los postulados, con vehículo, capacidad, ubicación y disponibilidad. |
+| `GET /postulaciones/mis-postulaciones` | camionero | Las suyas, la más nueva primero, con el estado de la carga. |
+| `POST /cargas/:id/asignar` | administrador | Asigna la carga a un postulado: `{ "id_camionero": 7 }`. |
 
 ---
 
@@ -208,7 +250,7 @@ scripts/crear-admin.js       primer administrador (POST /usuarios pide ser admin
 scripts/sembrar-localidades.js   catálogo geográfico desde la API georef
 scripts/localidades.json     respaldo del catálogo, para sembrar sin internet
 src/controllers/             un archivo por módulo
-src/domain/estadosCarga.js   máquina de estados de una carga
+src/domain/estadosCarga.js   máquina de estados de una carga y qué estados reciben postulaciones
 src/middlewares/auth.js      verifyToken y requireRol
 src/services/                lógica compartida entre controladores
 src/validators/              validación de los datos que llegan por body
