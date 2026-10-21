@@ -83,6 +83,15 @@ const TRANSICIONES = Object.freeze({
 const ESTADOS_FINALES = Object.freeze([ESTADOS.ENTREGADA, ESTADOS.CANCELADA]);
 
 /**
+ * Estados en los que una carga recibe postulaciones (HU 4): "disponible"
+ * mientras nadie se postuló y "pendiente" desde la primera postulación hasta
+ * que se asigna (HU 6). Son las que ve el camionero en el listado (HU 3): si
+ * viera sólo las disponibles, después del primer postulado nadie más podría
+ * postularse y el administrador no tendría entre quiénes elegir.
+ */
+const ESTADOS_ABIERTOS = Object.freeze([ESTADOS.DISPONIBLE, ESTADOS.PENDIENTE]);
+
+/**
  * Indica si un texto es uno de los seis estados conocidos.
  *
  * @param {*} valor - lo que llegó en el body o en un query param.
@@ -126,6 +135,7 @@ module.exports = {
     ESTADOS,
     ESTADOS_VALIDOS,
     ESTADOS_FINALES,
+    ESTADOS_ABIERTOS,
     FLUJO,
     TRANSICIONES,
     esEstadoValido,
