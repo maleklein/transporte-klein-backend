@@ -308,3 +308,24 @@ Si falta el módulo, la ubicación no se puede resolver o mapas falla, cercanía
 aporta cero y el candidato incluye una advertencia. No se redistribuyen pesos.
 La integración geográfica real queda pendiente hasta disponer del módulo de
 HU 9 y verificar cómo resuelve las ubicaciones en texto.
+
+### Endpoint y comprobación
+
+`GET /matching/:idCarga` requiere token y rol administrador. Responde con
+`id_carga`, `alcance: "postulados_pendientes"`, `calculado_en`, `pesos`,
+`parametros`, `sugeridos` (posición, total, desglose, advertencias y datos
+operativos) y `descartados` (id y motivos). Nunca incluye credenciales.
+Una lista vacía es 200; id inválido es 400, carga inexistente 404 y una carga
+cerrada, asignada o con peso inválido es 409. La respuesta no se guarda en caché.
+
+El cálculo relee los datos en cada consulta. Para evitar una instantánea
+inconsistente entre carga e historial, todo se obtiene con una sola consulta SQL.
+Las llamadas a mapas tienen un límite de espera de cinco segundos; el módulo de
+HU 9 debe gestionar también el timeout de su propia conexión y la cuota del
+proveedor. No se mantiene una caché de distancias entre consultas.
+
+`npm test` ejecuta las pruebas aisladas con distancias controladas. Para validar
+el SQL real, en PowerShell: `$env:MATCHING_DB_TEST='1'; npm test`. Ese caso abre
+una transacción, carga `tests/fixtures/matching.sql` en tablas temporales de la
+conexión y termina con ROLLBACK, sin modificar las tablas públicas ni sembrar la
+base de uso. El script no debe ejecutarse como una migración.

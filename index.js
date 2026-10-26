@@ -10,6 +10,7 @@ const notificacionControllers = require('./src/controllers/notificacionControlle
 const metricasControllers = require('./src/controllers/metricasControllers');
 const postulacionControllers = require('./src/controllers/postulacionControllers');
 const asignacionControllers = require('./src/controllers/asignacionControllers');
+const matchingControllers = require('./src/controllers/matchingControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
 const app = express();
@@ -54,6 +55,9 @@ app.get('/cargas/:id/postulaciones', verifyToken, requireRol('administrador'), p
 app.get('/postulaciones/mis-postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.obtenerMisPostulaciones);
 // HU 6 - Asignar carga a camionero: elige entre los postulados de esa carga.
 app.post('/cargas/:id/asignar', verifyToken, requireRol('administrador'), asignacionControllers.asignarCamionero);
+
+// HU 5 recomienda entre los postulados aptos; HU 6 conserva la asignación.
+app.get('/matching/:idCarga', verifyToken, requireRol('administrador'), matchingControllers.obtenerSugerencias);
 
 // Notificaciones (HU 12). Sin `requireRol`: administradores y camioneros
 // reciben avisos, y cada uno consulta y marca sólo los suyos.
