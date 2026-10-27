@@ -255,3 +255,77 @@ src/middlewares/auth.js      verifyToken y requireRol
 src/services/                lógica compartida entre controladores
 src/validators/              validación de los datos que llegan por body
 ```
+
+## Matching de camioneros (HU 5)
+
+Reglas acordadas con Tomás para esta primera versión: el ranking considera
+solamente **postulados pendientes aptos**. Recomendar no crea postulaciones ni
+asigna cargas; se conserva `POST /cargas/:id/asignar` de la HU 6.
+
+### Requisitos mínimos
+
+- Carga disponible o pendiente, sin camionero asignado y con peso positivo.
+- Usuario activo, con rol camionero y postulación pendiente para esa carga.
+- Capacidad positiva y mayor o igual al peso. Capacidad desconocida o inválida
+  excluye al candidato; no se compensa con otros puntos.
+- Disponibilidad explícitamente `true`; `false` o `NULL` excluyen al candidato.
+
+El booleano indica disponibilidad declarada. No se impone una nueva restricción
+por otros viajes: no hay agenda ni duración prevista para comprobar solapamientos.
+La asignación actual tampoco verifica capacidad ni disponibilidad. El ranking es
+una recomendación calculada al consultar, no una reserva ni una garantía de que
+los datos no cambiarán antes de confirmar.
+
+### Puntaje reproducible, de 0 a 100
+
+Los pesos acordados son 40/25/20/15. Se usan estas escalas iniciales, explícitas
+para poder contrastarlas con datos controlados y ajustarlas con el equipo:
+
+| Criterio | Puntos | Motivo |
+|---|---|---|
+| Capacidad | `40 * peso_kg / capacidad_kg` | Entre vehículos suficientes, favorece el que mejor ajusta su capacidad al peso. |
+| Cercanía | `25 * max(0, 1 - distancia_km / 300)` | El máximo corresponde a estar en el origen; desde 300 km aporta cero, sin excluir. |
+| Disponibilidad | `20` | Todos los aptos cumplen el requisito; este aporte es constante. |
+| Historial | `15 * min(viajes_entregados / 10, 1)` | Experiencia registrada: máximo desde diez entregas, sin excluir a los nuevos. |
+
+El historial cuenta cargas distintas entregadas cuyo `id_camionero_asignado`
+corresponda al candidato; no cuenta transiciones repetidas ni usa `id_actor`
+como conductor. Todavía no equivale a reputación ni a una calificación de HU 11.
+
+Se ordena por total sin redondear y, si empatan, por `id_camionero` ascendente.
+Los puntajes se redondean a dos decimales solamente en la respuesta. Las
+explicaciones incluyen los valores usados y los puntos de cada criterio.
+
+### Dependencia de HU 9
+
+La cercanía necesita la distancia **ubicación del camionero → origen**, no los
+kilómetros origen → destino de la carga. Se reutilizará
+`src/services/mapas.js`, con el contrato `obtenerDistanciaKm(origen, destino)`
+descrito en HU 9. No se agrega otro proveedor ni se inventan coordenadas para
+el texto libre de `CAMIONERO.ubicacion`.
+
+Si falta el módulo, la ubicación no se puede resolver o mapas falla, cercanía
+aporta cero y el candidato incluye una advertencia. No se redistribuyen pesos.
+La integración geográfica real queda pendiente hasta disponer del módulo de
+HU 9 y verificar cómo resuelve las ubicaciones en texto.
+
+### Endpoint y comprobación
+
+`GET /matching/:idCarga` requiere token y rol administrador. Responde con
+`id_carga`, `alcance: "postulados_pendientes"`, `calculado_en`, `pesos`,
+`parametros`, `sugeridos` (posición, total, desglose, advertencias y datos
+operativos) y `descartados` (id y motivos). Nunca incluye credenciales.
+Una lista vacía es 200; id inválido es 400, carga inexistente 404 y una carga
+cerrada, asignada o con peso inválido es 409. La respuesta no se guarda en caché.
+
+El cálculo relee los datos en cada consulta. Para evitar una instantánea
+inconsistente entre carga e historial, todo se obtiene con una sola consulta SQL.
+Las llamadas a mapas tienen un límite de espera de cinco segundos; el módulo de
+HU 9 debe gestionar también el timeout de su propia conexión y la cuota del
+proveedor. No se mantiene una caché de distancias entre consultas.
+
+`npm test` ejecuta las pruebas aisladas con distancias controladas. Para validar
+el SQL real, en PowerShell: `$env:MATCHING_DB_TEST='1'; npm test`. Ese caso abre
+una transacción, carga `tests/fixtures/matching.sql` en tablas temporales de la
+conexión y termina con ROLLBACK, sin modificar las tablas públicas ni sembrar la
+base de uso. El script no debe ejecutarse como una migración.

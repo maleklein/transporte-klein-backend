@@ -10,6 +10,7 @@ const notificacionControllers = require('./src/controllers/notificacionControlle
 const metricasControllers = require('./src/controllers/metricasControllers');
 const postulacionControllers = require('./src/controllers/postulacionControllers');
 const asignacionControllers = require('./src/controllers/asignacionControllers');
+const matchingControllers = require('./src/controllers/matchingControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
 const app = express();
@@ -55,6 +56,9 @@ app.get('/postulaciones/mis-postulaciones', verifyToken, requireRol('camionero')
 // HU 6 - Asignar carga a camionero: elige entre los postulados de esa carga.
 app.post('/cargas/:id/asignar', verifyToken, requireRol('administrador'), asignacionControllers.asignarCamionero);
 
+// HU 5 recomienda entre los postulados aptos; HU 6 conserva la asignación.
+app.get('/matching/:idCarga', verifyToken, requireRol('administrador'), matchingControllers.obtenerSugerencias);
+
 // Notificaciones (HU 12). Sin `requireRol`: administradores y camioneros
 // reciben avisos, y cada uno consulta y marca sólo los suyos.
 app.get('/notificaciones', verifyToken, notificacionControllers.listarNotificaciones);
@@ -65,6 +69,10 @@ app.get('/metricas', verifyToken, requireRol('administrador'), metricasControlle
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Servidor corriendo en el puerto ${PORT}`);
-});
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Servidor corriendo en el puerto ${PORT}`);
+    });
+}
+
+module.exports = app;
