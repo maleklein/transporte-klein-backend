@@ -113,9 +113,13 @@ CREATE TABLE CARGA (
     -- 'error' (reservado para cuando no haya ruta posible).
     estado_calculo_km VARCHAR(10) NOT NULL DEFAULT 'pendiente'
         CHECK (estado_calculo_km IN ('ok', 'pendiente', 'error')),
-    -- Estimaciones económicas: todavía sin usar.
-    costo_estimado NUMERIC,
-    ganancia_estimada NUMERIC,
+    -- Estimación económica del viaje (HU 10), calculada junto con los
+    -- kilómetros. NULL mientras no haya distancia: no se estima sobre cero.
+    costo_estimado NUMERIC(12, 2),
+    ganancia_estimada NUMERIC(12, 2),
+    -- Los parámetros con los que se calculó, como foto: si después cambian,
+    -- la carga conserva la cuenta que se hizo en su momento.
+    parametros_costo JSONB,
     -- Estado vigente. Nace 'disponible' (ESTADO_INICIAL en estadosCarga.js).
     -- "publicada" no es un estado real: no está en la máquina de estados ni
     -- en la base, sólo en un criterio de aceptación del SRS que no se siguió
@@ -191,6 +195,27 @@ CREATE TABLE NOTIFICACION (
     leida BOOLEAN NOT NULL DEFAULT FALSE,
     creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- ============================================================
+-- PARAMETRO_OPERATIVO — valores de la fórmula de costos (HU 10).
+-- Van en la base y no en el código porque el SRS pide que el
+-- administrador los pueda cambiar sin tocar el código. Cambiarlos
+-- no recalcula las cargas que ya tienen su estimación.
+-- ============================================================
+CREATE TABLE PARAMETRO_OPERATIVO (
+    clave VARCHAR(40) PRIMARY KEY,
+    valor NUMERIC(12, 4) NOT NULL CHECK (valor > 0),
+    descripcion VARCHAR(200),
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Valores de ejemplo, en pesos por kilómetro. Se cambian desde la pantalla
+-- de parámetros operativos.
+INSERT INTO PARAMETRO_OPERATIVO (clave, valor, descripcion) VALUES
+    ('costo_por_km', 1800, 'Costo operativo por kilómetro: combustible, desgaste y chofer'),
+    ('peaje_por_km', 150, 'Peajes promedio por kilómetro recorrido'),
+    ('tarifa_por_km', 2600, 'Lo que se le cobra al cliente por kilómetro');
 
 
 -- ============================================================
