@@ -6,6 +6,11 @@ const authControllers = require('./src/controllers/authControllers');
 const usuarioControllers = require('./src/controllers/usuarioControllers');
 const cargaControllers = require('./src/controllers/cargaControllers');
 const geografiaControllers = require('./src/controllers/geografiaControllers');
+const notificacionControllers = require('./src/controllers/notificacionControllers');
+const metricasControllers = require('./src/controllers/metricasControllers');
+const postulacionControllers = require('./src/controllers/postulacionControllers');
+const asignacionControllers = require('./src/controllers/asignacionControllers');
+const matchingControllers = require('./src/controllers/matchingControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
 const app = express();
@@ -33,8 +38,8 @@ app.get('/localidades', verifyToken, geografiaControllers.listarLocalidades);
 // Rutas de cargas.
 // Escribir (alta, edición, cambio de estado) es exclusivo del administrador.
 // Consultar queda abierto a cualquier usuario logueado, pero lo que ve depende
-// del rol: al camionero el controlador le devuelve sólo las cargas en
-// "disponible" (HU 3), que son a las que se puede postular.
+// del rol: al camionero el controlador le devuelve sólo las cargas disponibles
+// o pendientes (HU 3), que son a las que se puede postular.
 app.post('/cargas', verifyToken, requireRol('administrador'), cargaControllers.crearCarga);
 app.get('/cargas', verifyToken, cargaControllers.listarCargas);
 app.get('/cargas/:id', verifyToken, cargaControllers.obtenerCarga);
@@ -44,8 +49,31 @@ app.patch('/cargas/:id/estado', verifyToken, requireRol('administrador'), cargaC
 app.patch('/cargas/:id/cancelar', verifyToken, requireRol('administrador'), cargaControllers.cancelarCarga);
 app.post('/cargas/:id/recalcular-km', verifyToken, requireRol('administrador'), cargaControllers.recalcularKmCarga);
 
+// Postulaciones (HU 4). El camionero se postula y sigue las suyas; el
+// administrador ve quiénes se postularon a cada carga para asignarla (HU 6).
+app.post('/cargas/:id/postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.crearPostulacion);
+app.get('/cargas/:id/postulaciones', verifyToken, requireRol('administrador'), postulacionControllers.listarPostulantes);
+app.get('/postulaciones/mis-postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.obtenerMisPostulaciones);
+// HU 6 - Asignar carga a camionero: elige entre los postulados de esa carga.
+app.post('/cargas/:id/asignar', verifyToken, requireRol('administrador'), asignacionControllers.asignarCamionero);
+
+// HU 5 recomienda entre los postulados aptos; HU 6 conserva la asignación.
+app.get('/matching/:idCarga', verifyToken, requireRol('administrador'), matchingControllers.obtenerSugerencias);
+
+// Notificaciones (HU 12). Sin `requireRol`: administradores y camioneros
+// reciben avisos, y cada uno consulta y marca sólo los suyos.
+app.get('/notificaciones', verifyToken, notificacionControllers.listarNotificaciones);
+app.put('/notificaciones/:id/leida', verifyToken, notificacionControllers.marcarNotificacionLeida);
+
+// Panel de métricas (HU 13): sólo para administradores.
+app.get('/metricas', verifyToken, requireRol('administrador'), metricasControllers.obtenerMetricas);
+
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Servidor corriendo en el puerto ${PORT}`);
-});
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Servidor corriendo en el puerto ${PORT}`);
+    });
+}
+
+module.exports = app;

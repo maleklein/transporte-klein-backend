@@ -1,9 +1,9 @@
--- 002 — Kilómetros estimados entre origen y destino (HU 9).
+-- 005 — Kilómetros estimados entre origen y destino (HU 9).
 --
 -- Para una base que YA existe. Si estás armando la base de cero no corras esto:
 -- `script_tablas.sql` ya trae estas columnas.
 --
---   psql -d transporte_klein_db -f migrations/002_kilometros_estimados.sql
+--   psql -d transporte_klein_db -f migrations/005_kilometros_estimados.sql
 --
 -- No borra nada: las cargas que ya existen quedan con el cálculo pendiente y se
 -- pueden recalcular desde su detalle (POST /cargas/:id/recalcular-km).

@@ -116,8 +116,11 @@ CREATE TABLE CARGA (
     -- Estimaciones económicas: todavía sin usar.
     costo_estimado NUMERIC,
     ganancia_estimada NUMERIC,
-    -- Estado vigente. Nace 'disponible' y HU 2.3 lo pasa a 'publicada'.
-    -- El historial completo de transiciones va en ESTADO_CARGA.
+    -- Estado vigente. Nace 'disponible' (ESTADO_INICIAL en estadosCarga.js).
+    -- "publicada" no es un estado real: no está en la máquina de estados ni
+    -- en la base, sólo en un criterio de aceptación del SRS que no se siguió
+    -- (ver la nota en src/domain/estadosCarga.js). El historial completo de
+    -- transiciones va en ESTADO_CARGA.
     estado_actual VARCHAR(30) NOT NULL DEFAULT 'disponible',
     -- Administrador responsable del alta. NOT NULL a propósito: toda
     -- carga tiene que poder rastrearse hasta quién la creó.
@@ -144,6 +147,49 @@ CREATE TABLE ESTADO_CARGA (
     -- sistema (proceso automático) y no una persona.
     id_actor INTEGER REFERENCES USUARIO(id_usuario),
     marca_tiempo TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- ============================================================
+-- POSTULACION — un camionero que pide llevar una carga (HU 4).
+-- Relación muchos a muchos entre CAMIONERO y CARGA: el
+-- administrador elige entre los postulados al asignar (HU 6).
+-- ============================================================
+CREATE TABLE POSTULACION (
+    id_postulacion SERIAL PRIMARY KEY,
+    id_carga INTEGER NOT NULL REFERENCES CARGA(id_carga) ON DELETE CASCADE,
+    id_camionero INTEGER NOT NULL REFERENCES CAMIONERO(id_usuario) ON DELETE CASCADE,
+    -- 'pendiente' hasta que se asigna la carga; ahí pasa a 'aceptada' la
+    -- del camionero elegido y a 'rechazada' la de los demás.
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+    fecha_postulacion TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Un camionero se postula una sola vez a cada carga.
+    UNIQUE (id_carga, id_camionero)
+);
+
+
+-- ============================================================
+-- NOTIFICACION — avisos del sistema a cada usuario (HU 12):
+-- carga nueva, asignación y cambios de estado.
+-- Leerla no la borra: `leida` sólo cambia su estado, así queda
+-- constancia de qué se le avisó a quién y cuándo.
+-- ============================================================
+CREATE TABLE NOTIFICACION (
+    id_notificacion SERIAL PRIMARY KEY,
+    -- Destinatario. ON DELETE CASCADE por el mismo motivo que la
+    -- bitácora: un aviso sin destinatario no tiene a quién mostrarse.
+    id_usuario INTEGER NOT NULL REFERENCES USUARIO(id_usuario) ON DELETE CASCADE,
+    -- 'carga_nueva', 'cambio_estado', 'carga_asignada', ... La lista
+    -- completa está en src/services/notificaciones.js.
+    tipo_evento VARCHAR(40) NOT NULL,
+    -- El texto se guarda ya armado: cuenta lo que pasó en ese momento,
+    -- aunque después la carga se edite.
+    contenido TEXT NOT NULL,
+    -- Carga a la que se refiere, para ir al detalle desde el aviso.
+    -- NULL queda para avisos que no sean de una carga puntual.
+    id_carga INTEGER REFERENCES CARGA(id_carga) ON DELETE CASCADE,
+    leida BOOLEAN NOT NULL DEFAULT FALSE,
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 
@@ -192,3 +238,17 @@ CREATE INDEX idx_localidad_provincia_nombre ON LOCALIDAD (id_provincia, nombre);
 
 -- La bitácora siempre se pide por carga y ordenada por fecha (HU 8).
 CREATE INDEX idx_estado_carga_carga_tiempo ON ESTADO_CARGA (id_carga, marca_tiempo);
+
+-- El panel de métricas (HU 13) recorre la bitácora completa filtrando sólo
+-- por fecha, sin pasar por una carga puntual.
+CREATE INDEX idx_estado_carga_tiempo ON ESTADO_CARGA (marca_tiempo);
+
+-- "Mis viajes" pide las postulaciones de un camionero, la más nueva primero.
+-- Las de una carga (lo que mira el administrador al asignar) ya las cubre el
+-- índice que arma el UNIQUE (id_carga, id_camionero).
+CREATE INDEX idx_postulacion_camionero_fecha ON POSTULACION (id_camionero, fecha_postulacion);
+
+-- Las notificaciones siempre se piden por usuario, a veces sólo las no
+-- leídas, y de la más nueva a la más vieja (HU 12). El contador de la barra
+-- superior hace esa consulta cada medio minuto por cada usuario conectado.
+CREATE INDEX idx_notificacion_usuario_leida_fecha ON NOTIFICACION (id_usuario, leida, creado_en);
