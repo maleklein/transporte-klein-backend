@@ -4,6 +4,21 @@ API del sistema de gestión de cargas. Node + Express + PostgreSQL.
 
 ---
 
+## Actualizar la base: kilómetros estimados (HU 9)
+
+Si tu base ya tiene el catálogo geográfico (la sección de abajo), alcanza con:
+
+```bash
+psql -d transporte_klein_db -f migrations/005_kilometros_estimados.sql
+```
+
+Agrega a `CARGA` la columna `estado_calculo_km` y le da escala a
+`kilometros_estimados`. No borra nada: las cargas que ya tenías quedan con el
+cálculo pendiente y se recalculan con el botón Reintentar de su detalle. Si la
+base la armás de cero, no hace falta: `script_tablas.sql` ya trae las columnas.
+
+---
+
 ## Actualizar la base con las postulaciones (HU 4 y HU 6)
 
 **Una vez, cuando traigas esta rama.** Sin la tabla nueva, postularse, ver los
@@ -89,6 +104,29 @@ node scripts/crear-admin.js <email> <contraseña>
   ```
 - **La siembra se puede repetir las veces que haga falta.** No duplica nada:
   actualiza lo que ya está.
+
+---
+
+## Cálculo de kilómetros estimados (HU 9)
+
+El proveedor elegido para calcular la distancia entre origen y destino es
+**OpenRouteService**: da 2.000 consultas diarias gratis sin pedir tarjeta
+(la alternativa evaluada, Google Distance Matrix, sí la pide aunque se use
+el nivel gratuito).
+
+Para que el cálculo funcione hace falta una key propia:
+
+1. Registrarse gratis en https://openrouteservice.org/dev/#/signup
+2. Generar una API key (plan estándar/gratuito).
+3. Completar `ORS_API_KEY` en tu `.env`.
+
+Sin esa key, `src/services/mapas.js` no rompe nada: devuelve `null` y la
+carga queda con el cálculo pendiente (RN-04). Para probar el módulo de forma
+aislada, sin pasar por ningún endpoint:
+
+```bash
+node scripts/probar-mapas.js <id_localidad_origen> <id_localidad_destino>
+```
 
 ---
 

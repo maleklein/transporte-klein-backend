@@ -1,11 +1,13 @@
 /**
- * Controlador del módulo de Cargas (HU 2.1 + 2.1.1 + 2.2 + 3 + 7 + 8 + 12).
- * Expone el alta, la edición, la consulta y el cambio de estado de las cargas.
+ * Controlador del módulo de Cargas (HU 2.1 + 2.1.1 + 2.2 + 3 + 7 + 8 + 9 + 12).
+ * Expone el alta, la edición, la consulta, el cambio de estado y el cálculo de
+ * kilómetros de las cargas.
  */
 
 const pool = require('../db');
 const { validarCampos, esFechaValida } = require('../validators/carga');
 const { registrarCambioEstado } = require('../services/registrarCambioEstado');
+const { obtenerDistanciaKm } = require('../services/mapas');
 const { notificarCargaNueva } = require('../services/notificaciones');
 const { COLUMNAS_UBICACION, JOIN_UBICACION } = require('../services/ubicacionCarga');
 const {
@@ -27,6 +29,25 @@ const ESTADO_INICIAL = ESTADOS.DISPONIBLE;
  * carga cancelada tampoco se edita: no hay viaje que seguir planificando.
  */
 const ESTADOS_BLOQUEADOS_EDICION = [ESTADOS.EN_VIAJE, ESTADOS.ENTREGADA, ESTADOS.CANCELADA];
+
+/**
+ * Valores de `CARGA.estado_calculo_km` (HU 9). 'error' también lo admite la
+ * base, pero queda reservado: hoy el servicio de mapas no distingue "no hay
+ * ruta" de "el proveedor no respondió", así que todo fallo es 'pendiente'.
+ */
+const ESTADOS_CALCULO_KM = {
+    OK: 'ok',
+    PENDIENTE: 'pendiente',
+};
+
+/**
+ * Columnas del cálculo de distancia (HU 9). Mismo criterio que
+ * `COLUMNAS_UBICACION`: van en todas las consultas que devuelven una carga,
+ * para que ninguna pantalla se quede sin los kilómetros después de editarla o
+ * de cambiarle el estado.
+ */
+const COLUMNAS_DISTANCIA = `
+                    c.kilometros_estimados, c.estado_calculo_km`;
 
 /**
  * Verifica que las dos localidades del body existan en el catálogo.
@@ -61,6 +82,44 @@ const verificarLocalidades = async (ejecutor, valores) => {
 };
 
 /**
+ * Calcula la distancia por ruta entre dos localidades del catálogo (HU 9).
+ *
+ * Busca sus coordenadas y se las pasa al servicio de mapas. Igual que ese
+ * servicio, nunca lanza por un problema del proveedor: devuelve `null` y quien
+ * llama guarda la carga con el cálculo pendiente (RN-04). También devuelve
+ * `null` si alguna localidad no existe; ese error lo reporta después
+ * `verificarLocalidades`, que es quien lo traduce a un mensaje por campo.
+ *
+ * Se llama con el pool y FUERA de cualquier transacción a propósito: la
+ * consulta al proveedor puede tardar hasta 5 segundos, y mientras tanto no
+ * tiene sentido tener una conexión de la base tomada con una transacción abierta.
+ *
+ * @param {string} idOrigen - id de localidad de origen (8 dígitos).
+ * @param {string} idDestino - id de localidad de destino (8 dígitos).
+ * @returns {Promise<number|null>} kilómetros con 2 decimales, o null si no se pudo calcular.
+ */
+const calcularKmEntreLocalidades = async (idOrigen, idDestino) => {
+    const resultado = await pool.query(
+        'SELECT id_localidad, latitud, longitud FROM LOCALIDAD WHERE id_localidad = ANY($1::char(8)[])',
+        [[idOrigen, idDestino]],
+    );
+
+    const porId = Object.fromEntries(resultado.rows.map((fila) => [fila.id_localidad.trim(), fila]));
+    const origen = porId[idOrigen];
+    const destino = porId[idDestino];
+
+    if (!origen || !destino) {
+        return null;
+    }
+
+    // NUMERIC llega como texto desde el driver; el servicio espera números.
+    return obtenerDistanciaKm(
+        { lat: Number(origen.latitud), lon: Number(origen.longitud) },
+        { lat: Number(destino.latitud), lon: Number(destino.longitud) },
+    );
+};
+
+/**
  * POST /cargas: da de alta una carga y la deja en estado "disponible".
  *
  * Valida primero todos los campos y recién después consulta la base, así una
@@ -71,6 +130,10 @@ const verificarLocalidades = async (ejecutor, valores) => {
  * El administrador que queda como creador sale de `req.usuario`, que deja el
  * middleware `verifyToken`. La ruta ya exige rol de administrador, así que acá
  * no hace falta volver a chequearlo.
+ *
+ * Calcula además los kilómetros entre origen y destino (HU 9). Si el servicio
+ * de mapas no responde, la carga se crea igual con `estado_calculo_km` en
+ * 'pendiente' (RN-04): el alta nunca falla por culpa del proveedor.
  *
  * Respuestas: 201 con la carga creada · 400 si hay campos inválidos ·
  * 500 ante un error inesperado. El 401 (sin token) y el 403 (rol o cuenta
@@ -89,6 +152,17 @@ const crearCarga = async (req, res) => {
             errores,
         });
     }
+
+    // Antes de abrir la transacción: ver `calcularKmEntreLocalidades`.
+    let kilometros = null;
+    try {
+        kilometros = await calcularKmEntreLocalidades(valores.origen_id, valores.destino_id);
+    } catch (error) {
+        // Sólo puede fallar la lectura de coordenadas. Tampoco eso bloquea el
+        // alta: si la base está caída, la transacción de abajo lo va a reportar.
+        console.error('No se pudieron leer las coordenadas para calcular la distancia:', error.message);
+    }
+    const estadoCalculoKm = kilometros === null ? ESTADOS_CALCULO_KM.PENDIENTE : ESTADOS_CALCULO_KM.OK;
 
     // Transacción porque el alta son dos escrituras: la carga y su primer
     // registro en la bitácora. Si la segunda fallara, la carga no puede quedar
@@ -114,8 +188,8 @@ const crearCarga = async (req, res) => {
         // catálogo, todo en una sola ida a la base.
         const resultado = await client.query(
             `WITH nueva AS (
-                 INSERT INTO CARGA (id_localidad_origen, id_localidad_destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 INSERT INTO CARGA (id_localidad_origen, id_localidad_destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador, kilometros_estimados, estado_calculo_km)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                  RETURNING *
              )
              SELECT c.id_carga,${COLUMNAS_UBICACION},
@@ -123,7 +197,8 @@ const crearCarga = async (req, res) => {
                     -- Sin el TO_CHAR, el driver convierte el DATE a un Date de JS usando
                     -- la zona horaria local y el front termina recibiendo un timestamp.
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
-                    c.observaciones, c.estado_actual, c.id_admin_creador, c.creado_en, c.actualizado_en
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM nueva c${JOIN_UBICACION}`,
             // Los valores ya vienen limpios y normalizados de validarCampos.
             [
@@ -135,6 +210,8 @@ const crearCarga = async (req, res) => {
                 valores.observaciones,
                 ESTADO_INICIAL,
                 req.usuario.id,
+                kilometros,
+                estadoCalculoKm,
             ]
         );
 
@@ -240,7 +317,7 @@ const listarCargas = async (req, res) => {
                     -- un Date de JS corrido por la zona horaria local.
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
                     c.observaciones,
-                    c.estado_actual
+                    c.estado_actual,${COLUMNAS_DISTANCIA}
              FROM CARGA c${JOIN_UBICACION}
              WHERE ($1::text[] IS NULL OR c.estado_actual = ANY($1::text[]))
                AND ($2 = '' OR c.fecha = $2::date)
@@ -284,7 +361,7 @@ const obtenerCarga = async (req, res) => {
                     -- un Date de JS corrido por la zona horaria local.
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
                     c.observaciones,
-                    c.estado_actual,
+                    c.estado_actual,${COLUMNAS_DISTANCIA},
                     c.id_camionero_asignado
              FROM CARGA c${JOIN_UBICACION}
              WHERE c.id_carga = $1`,
@@ -375,8 +452,13 @@ const obtenerHistorialCarga = async (req, res) => {
  * motivos distintos: en viaje es un bloqueo mientras dure ese estado, y si
  * hace falta corregir algo se la puede volver a 'aceptada' (HU 7); entregada
  * es definitivo, porque es un estado final del que ya no se vuelve (RN-01).
- * No toca `estado_actual` ni recalcula kilómetros al cambiar origen/destino
- * (HU 9).
+ * No toca `estado_actual`.
+ *
+ * Si cambió el origen o el destino, recalcula los kilómetros (HU 9) igual que
+ * el alta: 'ok' con el valor nuevo, o 'pendiente' si el servicio de mapas no
+ * respondió. En ese caso los kilómetros viejos se borran, porque eran de otro
+ * recorrido. Si la ruta no cambió no se consulta al proveedor: los kilómetros
+ * siguen valiendo y cada consulta gasta cuota.
  *
  * Respuestas: 200 con la carga actualizada · 400 si `id` no es numérico o hay
  * campos inválidos · 404 si no existe una carga con ese id · 409 si la carga
@@ -404,7 +486,7 @@ const actualizarCarga = async (req, res) => {
         // Se busca la carga primero para poder distinguir el 404 (no existe) del
         // 409 (existe pero su estado ya no admite edición).
         const cargaExistente = await pool.query(
-            'SELECT id_carga, estado_actual FROM CARGA WHERE id_carga = $1',
+            'SELECT id_carga, estado_actual, id_localidad_origen, id_localidad_destino FROM CARGA WHERE id_carga = $1',
             [idCarga]
         );
 
@@ -436,12 +518,28 @@ const actualizarCarga = async (req, res) => {
             });
         }
 
+        const anterior = cargaExistente.rows[0];
+        const cambioRuta =
+            anterior.id_localidad_origen.trim() !== valores.origen_id ||
+            anterior.id_localidad_destino.trim() !== valores.destino_id;
+
+        let kilometros = null;
+        let estadoCalculoKm = null;
+        if (cambioRuta) {
+            kilometros = await calcularKmEntreLocalidades(valores.origen_id, valores.destino_id);
+            estadoCalculoKm = kilometros === null ? ESTADOS_CALCULO_KM.PENDIENTE : ESTADOS_CALCULO_KM.OK;
+        }
+
         // Mismo CTE que en el alta: el UPDATE no puede hacer JOIN en su
         // RETURNING, así que se vuelve a leer la fila ya resuelta.
+        // Con $8 en false (la ruta no cambió) los CASE dejan los kilómetros
+        // como estaban.
         const resultado = await pool.query(
             `WITH modificada AS (
                  UPDATE CARGA
-                 SET id_localidad_origen = $1, id_localidad_destino = $2, tipo_carga = $3, peso_kg = $4, fecha = $5, observaciones = $6
+                 SET id_localidad_origen = $1, id_localidad_destino = $2, tipo_carga = $3, peso_kg = $4, fecha = $5, observaciones = $6,
+                     kilometros_estimados = CASE WHEN $8 THEN $9::numeric ELSE kilometros_estimados END,
+                     estado_calculo_km = CASE WHEN $8 THEN $10::varchar ELSE estado_calculo_km END
                  WHERE id_carga = $7
                  RETURNING *
              )
@@ -450,7 +548,8 @@ const actualizarCarga = async (req, res) => {
                     -- Mismo criterio que en el alta: sin TO_CHAR el driver devuelve
                     -- un Date de JS corrido por la zona horaria local.
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
-                    c.observaciones, c.estado_actual, c.id_admin_creador, c.creado_en, c.actualizado_en
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM modificada c${JOIN_UBICACION}`,
             [
                 valores.origen_id,
@@ -460,6 +559,9 @@ const actualizarCarga = async (req, res) => {
                 valores.fecha,
                 valores.observaciones,
                 idCarga,
+                cambioRuta,
+                kilometros,
+                estadoCalculoKm,
             ]
         );
 
@@ -575,7 +677,8 @@ const cambiarEstadoCarga = async (req, res) => {
              SELECT c.id_carga,${COLUMNAS_UBICACION},
                     c.tipo_carga, c.peso_kg,
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
-                    c.observaciones, c.estado_actual, c.id_admin_creador, c.creado_en, c.actualizado_en
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM modificada c${JOIN_UBICACION}`,
             [estadoNuevo, idCarga]
         );
@@ -693,7 +796,8 @@ const cancelarCarga = async (req, res) => {
              SELECT c.id_carga,${COLUMNAS_UBICACION},
                     c.tipo_carga, c.peso_kg,
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
-                    c.observaciones, c.estado_actual, c.id_admin_creador, c.creado_en, c.actualizado_en
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM modificada c${JOIN_UBICACION}`,
             [ESTADOS.CANCELADA, idCarga]
         );
@@ -712,6 +816,75 @@ const cancelarCarga = async (req, res) => {
     }
 };
 
+/**
+ * POST /cargas/:id/recalcular-km (HU 9): vuelve a pedirle la distancia al
+ * servicio de mapas, para las cargas que quedaron con el cálculo pendiente.
+ *
+ * Si el proveedor sigue sin responder no se toca la fila: la carga conserva lo
+ * que tenía y se responde 503, para que la pantalla avise que el reintento no
+ * funcionó en vez de mostrar "pendiente" otra vez sin explicación.
+ *
+ * No escribe en la bitácora de ESTADO_CARGA: recalcular la distancia no es un
+ * cambio de estado de la carga.
+ *
+ * Respuestas: 200 con la carga actualizada · 400 si `id` no es numérico ·
+ * 404 si no existe la carga · 503 si el servicio de mapas no respondió ·
+ * 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express. Params: id.
+ * @param {import('express').Response} res - response de Express.
+ * @returns {Promise<void>}
+ */
+const recalcularKmCarga = async (req, res) => {
+    const idCarga = Number(req.params.id);
+    if (!Number.isInteger(idCarga) || idCarga <= 0) {
+        return res.status(400).json({ message: "El parámetro 'id' debe ser numérico" });
+    }
+
+    try {
+        const cargaExistente = await pool.query(
+            'SELECT id_localidad_origen, id_localidad_destino FROM CARGA WHERE id_carga = $1',
+            [idCarga]
+        );
+
+        if (cargaExistente.rows.length === 0) {
+            return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
+        }
+
+        const { id_localidad_origen: idOrigen, id_localidad_destino: idDestino } = cargaExistente.rows[0];
+        const kilometros = await calcularKmEntreLocalidades(idOrigen.trim(), idDestino.trim());
+
+        if (kilometros === null) {
+            return res.status(503).json({
+                message: 'El servicio de mapas no respondió. La distancia sigue pendiente: probá de nuevo en unos minutos.',
+            });
+        }
+
+        // Mismo CTE que en la edición, para devolver la carga completa y que el
+        // detalle se actualice sin volver a pedirla.
+        const resultado = await pool.query(
+            `WITH modificada AS (
+                 UPDATE CARGA
+                 SET kilometros_estimados = $1, estado_calculo_km = $2
+                 WHERE id_carga = $3
+                 RETURNING *
+             )
+             SELECT c.id_carga,${COLUMNAS_UBICACION},
+                    c.tipo_carga, c.peso_kg,
+                    TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.id_admin_creador, c.creado_en, c.actualizado_en
+             FROM modificada c${JOIN_UBICACION}`,
+            [kilometros, ESTADOS_CALCULO_KM.OK, idCarga]
+        );
+
+        return res.status(200).json(resultado.rows[0]);
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+};
+
 module.exports = {
     crearCarga,
     listarCargas,
@@ -720,4 +893,5 @@ module.exports = {
     actualizarCarga,
     cambiarEstadoCarga,
     cancelarCarga,
+    recalcularKmCarga,
 };
