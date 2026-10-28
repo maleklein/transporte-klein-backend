@@ -8,6 +8,7 @@ const pool = require('../db');
 const { registrarCambioEstado } = require('../services/registrarCambioEstado');
 const { notificarAsignacion } = require('../services/notificaciones');
 const { COLUMNAS_UBICACION, JOIN_UBICACION } = require('../services/ubicacionCarga');
+const { COLUMNAS_COSTOS } = require('../services/parametrosOperativos');
 const { ESTADOS } = require('../domain/estadosCarga');
 
 /**
@@ -115,8 +116,8 @@ const asignarCamionero = async (req, res) => {
         await registrarCambioEstado(idCarga, ESTADOS.PENDIENTE, ESTADOS.ACEPTADA, idAdmin, client);
 
         // 4. Asignar el camionero. Devuelve la carga entera, con el catálogo
-        // resuelto y los kilómetros (HU 9), para que el detalle se redibuje sin
-        // recargar y sin perder la distancia.
+        // resuelto, los kilómetros (HU 9) y la estimación económica (HU 10), para
+        // que el detalle se redibuje sin recargar y sin perder esos bloques.
         const resultado = await client.query(
             `WITH modificada AS (
                  UPDATE CARGA
@@ -128,7 +129,7 @@ const asignarCamionero = async (req, res) => {
                     c.tipo_carga, c.peso_kg,
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
                     c.observaciones, c.estado_actual, c.id_camionero_asignado,
-                    c.kilometros_estimados, c.estado_calculo_km,
+                    c.kilometros_estimados, c.estado_calculo_km,${COLUMNAS_COSTOS},
                     c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM modificada c${JOIN_UBICACION}`,
             [idCamionero, idCarga]
