@@ -337,15 +337,32 @@ explicaciones incluyen los valores usados y los puntos de cada criterio.
 ### Dependencia de HU 9
 
 La cercanía necesita la distancia **ubicación del camionero → origen**, no los
-kilómetros origen → destino de la carga. Se reutilizará
-`src/services/mapas.js`, con el contrato `obtenerDistanciaKm(origen, destino)`
-descrito en HU 9. No se agrega otro proveedor ni se inventan coordenadas para
-el texto libre de `CAMIONERO.ubicacion`.
+kilómetros origen → destino de la carga. Se reutiliza `src/services/mapas.js`
+de HU 9: `obtenerDistanciaKm({lat, lon}, {lat, lon})` recibe **coordenadas**,
+no nombres. No se agrega otro proveedor ni se cambia la integración de HU 9.
 
-Si falta el módulo, la ubicación no se puede resolver o mapas falla, cercanía
+`src/services/ubicacionMatching.js` convierte el texto de `CAMIONERO.ubicacion`
+a una localidad del catálogo local. Se ignoran diferencias de mayúsculas,
+tildes y espacios, pero no se adivinan nombres ni se aceptan direcciones:
+
+- Formato recomendado: `Paraná, Entre Ríos`.
+- Si el nombre se repite dentro de la provincia: `Localidad, Departamento, Provincia`.
+- Un nombre sin provincia se acepta solo si es único en todo el catálogo.
+- Una ubicación ausente, desconocida o ambigua conserva al apto en el ranking,
+  con cercanía cero y una advertencia que permite corregir su perfil.
+
+El origen sale de la FK de CARGA y sus coordenadas en LOCALIDAD. Las coordenadas
+del camionero también son el centroide de su localidad declarada: **no es GPS
+en tiempo real**. La respuesta incluye `ubicacion_resuelta` para mostrar qué
+localidad se usó. Dentro de la misma localidad, la distancia entre centroides es
+cero; en ese caso no se consulta la API. Para distintas localidades se calcula
+la ruta mediante el módulo existente de HU 9.
+
+Si falta `ORS_API_KEY`, la ubicación no se puede resolver o mapas falla, cercanía
 aporta cero y el candidato incluye una advertencia. No se redistribuyen pesos.
-La integración geográfica real queda pendiente hasta disponer del módulo de
-HU 9 y verificar cómo resuelve las ubicaciones en texto.
+La clave se configura solo en el `.env` local del backend; no se comparte en
+capturas ni se versiona. Sin clave se puede probar el resto del ranking, pero
+no certificar una consulta real al proveedor.
 
 ### Endpoint y comprobación
 
@@ -357,10 +374,14 @@ Una lista vacía es 200; id inválido es 400, carga inexistente 404 y una carga
 cerrada, asignada o con peso inválido es 409. La respuesta no se guarda en caché.
 
 El cálculo relee los datos en cada consulta. Para evitar una instantánea
-inconsistente entre carga e historial, todo se obtiene con una sola consulta SQL.
+inconsistente entre carga e historial, esos datos se obtienen con una sola
+consulta SQL. Si hay aptos con origen válido, una segunda consulta lee el
+catálogo geográfico, sin una consulta por cada camionero.
 Las llamadas a mapas tienen un límite de espera de cinco segundos; el módulo de
 HU 9 debe gestionar también el timeout de su propia conexión y la cuota del
-proveedor. No se mantiene una caché de distancias entre consultas.
+proveedor. Se comparte una petición por localidad dentro del mismo ranking,
+incluso si sus nombres se escribieron de formas diferentes. No se mantiene una
+caché de distancias entre consultas.
 
 `npm test` ejecuta las pruebas aisladas con distancias controladas. Para validar
 el SQL real, en PowerShell: `$env:MATCHING_DB_TEST='1'; npm test`. Ese caso abre

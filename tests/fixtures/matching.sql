@@ -9,7 +9,8 @@ CREATE TEMP TABLE CAMIONERO (
 ) ON COMMIT DROP;
 CREATE TEMP TABLE PROVINCIA (id_provincia TEXT PRIMARY KEY, nombre TEXT) ON COMMIT DROP;
 CREATE TEMP TABLE LOCALIDAD (
-    id_localidad TEXT PRIMARY KEY, id_provincia TEXT, nombre TEXT
+    id_localidad TEXT PRIMARY KEY, id_provincia TEXT, nombre TEXT,
+    departamento TEXT, latitud NUMERIC, longitud NUMERIC
 ) ON COMMIT DROP;
 CREATE TEMP TABLE CARGA (
     id_carga INTEGER PRIMARY KEY, peso_kg NUMERIC, estado_actual TEXT,
@@ -20,7 +21,9 @@ CREATE TEMP TABLE POSTULACION (
 ) ON COMMIT DROP;
 
 INSERT INTO PROVINCIA VALUES ('30', 'Entre Ríos');
-INSERT INTO LOCALIDAD VALUES ('30000001', '30', 'Paraná');
+INSERT INTO PROVINCIA VALUES ('82', 'Santa Fe');
+INSERT INTO LOCALIDAD VALUES ('30000001', '30', 'Paraná', 'Paraná', -31.740148, -60.527466);
+INSERT INTO LOCALIDAD VALUES ('82063170', '82', 'Santa Fe', 'La Capital', -31.646557, -60.709996);
 INSERT INTO USUARIO VALUES
     (1, 'Ana', 'Prueba', 'activo', 'camionero'),
     (2, 'Bruno', 'Prueba', 'activo', 'camionero'),
