@@ -383,8 +383,22 @@ proveedor. Se comparte una petición por localidad dentro del mismo ranking,
 incluso si sus nombres se escribieron de formas diferentes. No se mantiene una
 caché de distancias entre consultas.
 
-`npm test` ejecuta las pruebas aisladas con distancias controladas. Para validar
-el SQL real, en PowerShell: `$env:MATCHING_DB_TEST='1'; npm test`. Ese caso abre
-una transacción, carga `tests/fixtures/matching.sql` en tablas temporales de la
-conexión y termina con ROLLBACK, sin modificar las tablas públicas ni sembrar la
-base de uso. El script no debe ejecutarse como una migración.
+`npm test` ejecuta las pruebas con distancias controladas. Para habilitar también
+el SQL y el circuito real, en PowerShell: `$env:MATCHING_DB_TEST='1'; npm test`.
+Se usa PostgreSQL con tablas temporales, sin modificar las tablas públicas ni
+sembrar la base de uso:
+
+- `matching-db.test.js` carga `tests/fixtures/matching.sql` en una transacción
+  y termina con ROLLBACK. Ese archivo de datos no es una migración.
+- `matching-integracion.test.js` crea las ocho tablas temporales con el esquema
+  real y limita la búsqueda de tablas a `pg_temp, pg_catalog`. Ejecuta login,
+  alta de carga, postulaciones, ranking, asignación, historial y notificaciones
+  por HTTP. Los controladores confirman sus transacciones sobre esas tablas
+  temporales; cerrar la conexión las elimina. Solo se simula OpenRouteService.
+- `matching-mapas.test.js` utiliza el módulo real de HU 9 con respuestas HTTP
+  controladas, comprobando orden de coordenadas, conversión metros/km y puntaje.
+
+Con `MATCHING_DB_TEST=1`, la verificación inicial de esta integración pasó las
+54 comprobaciones. Eso no certifica el acceso al proveedor: falta configurar
+una clave válida en el entorno local y verificar al menos una ruta real entre
+localidades diferentes antes de cerrar la validación de mapas.
