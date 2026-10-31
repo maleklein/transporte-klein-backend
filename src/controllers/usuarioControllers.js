@@ -13,6 +13,42 @@ const CAMPOS_EDITABLES = ['nombre', 'apellido', 'email', 'estado'];
 const CAMPOS_BLOQUEADOS = ['dni', 'rol', 'contraseña'];
 const ESTADOS_VALIDOS = ['activo', 'inactivo'];
 
+// HU 1.1 y 1.2: mismas reglas para nombre y apellido, en el alta y la edición.
+// \p{L} (con flag "u") son las letras Unicode, así que cubre tildes y la ñ sin
+// tener que listarlas a mano. Tiene que empezar con una letra para que algo
+// como "-" o "'" solos no pasen como nombre.
+const PATRON_NOMBRE_APELLIDO = /^[\p{L}][\p{L} '-]*$/u;
+const LARGO_MAXIMO_NOMBRE_APELLIDO = 50;
+
+/**
+ * Valida y recorta nombre o apellido (HU 1.1 y 1.2).
+ *
+ * Se llama después de confirmar que el campo vino (ver el loop de
+ * CAMPOS_OBLIGATORIOS/CAMPOS_EDITABLES en cada controlador), así que acá ya
+ * se sabe que `valor` no es vacío ni sólo espacios. El largo máximo se
+ * chequea antes de tocar la base a propósito: la columna es VARCHAR(50), y
+ * sin este chequeo un valor más largo rompería el INSERT/UPDATE con un 500
+ * en vez de un 400 con un mensaje claro.
+ *
+ * No hay largo mínimo: un nombre o apellido de una sola letra es válido.
+ *
+ * @param {*} valor - lo que llegó en el body.
+ * @param {string} etiqueta - 'nombre' o 'apellido', para armar el mensaje de error.
+ * @returns {{ error: string } | { valor: string }} el error, o el valor ya recortado.
+ */
+const validarNombreApellido = (valor, etiqueta) => {
+    const texto = String(valor).trim();
+
+    if (texto.length > LARGO_MAXIMO_NOMBRE_APELLIDO) {
+        return { error: `El ${etiqueta} no puede superar los ${LARGO_MAXIMO_NOMBRE_APELLIDO} caracteres.` };
+    }
+    if (!PATRON_NOMBRE_APELLIDO.test(texto)) {
+        return { error: `El ${etiqueta} solo puede contener letras, espacios, guiones y apóstrofes.` };
+    }
+
+    return { valor: texto };
+};
+
 /**
  * Controlador de POST /usuarios: da de alta un usuario (administrador o camionero).
  * Si el rol es 'camionero', crea además el registro asociado en CAMIONERO.
@@ -22,7 +58,7 @@ const ESTADOS_VALIDOS = ['activo', 'inactivo'];
  * @returns {Promise<import('express').Response>} 201 con el usuario creado, 400 por validación o duplicados, 500 ante error inesperado.
  */
 const crearUsuario = async (req, res) => {
-    const { nombre, apellido, dni, email, contraseña, ubicacion, tipo_vehiculo, capacidad_kg } = req.body;
+    const { dni, email, contraseña, ubicacion, tipo_vehiculo, capacidad_kg } = req.body;
 
     for (const campo of CAMPOS_OBLIGATORIOS) {
         const valor = req.body[campo];
@@ -30,6 +66,17 @@ const crearUsuario = async (req, res) => {
             return res.status(400).json({ message: `El campo '${campo}' es obligatorio` });
         }
     }
+
+    const nombreValidado = validarNombreApellido(req.body.nombre, 'nombre');
+    if (nombreValidado.error) {
+        return res.status(400).json({ message: nombreValidado.error });
+    }
+    const apellidoValidado = validarNombreApellido(req.body.apellido, 'apellido');
+    if (apellidoValidado.error) {
+        return res.status(400).json({ message: apellidoValidado.error });
+    }
+    const nombre = nombreValidado.valor;
+    const apellido = apellidoValidado.valor;
 
     // Se normaliza para que "Administrador " o "CAMIONERO" también sean válidos.
     const rol = String(req.body.rol).trim().toLowerCase();
@@ -144,7 +191,18 @@ const actualizarUsuario = async (req, res) => {
         }
     }
 
-    const { nombre, apellido, email, ubicacion, tipo_vehiculo, capacidad_kg } = req.body;
+    const nombreValidado = validarNombreApellido(req.body.nombre, 'nombre');
+    if (nombreValidado.error) {
+        return res.status(400).json({ message: nombreValidado.error });
+    }
+    const apellidoValidado = validarNombreApellido(req.body.apellido, 'apellido');
+    if (apellidoValidado.error) {
+        return res.status(400).json({ message: apellidoValidado.error });
+    }
+
+    const { email, ubicacion, tipo_vehiculo, capacidad_kg } = req.body;
+    const nombre = nombreValidado.valor;
+    const apellido = apellidoValidado.valor;
     const estado = String(req.body.estado).trim().toLowerCase();
     if (!ESTADOS_VALIDOS.includes(estado)) {
         return res.status(400).json({ message: `El campo 'estado' debe ser 'activo' o 'inactivo'` });
