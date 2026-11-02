@@ -12,6 +12,7 @@ const postulacionControllers = require('./src/controllers/postulacionControllers
 const asignacionControllers = require('./src/controllers/asignacionControllers');
 const matchingControllers = require('./src/controllers/matchingControllers');
 const parametrosControllers = require('./src/controllers/parametrosControllers');
+const calificacionControllers = require('./src/controllers/calificacionControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
 const app = express();
@@ -60,6 +61,11 @@ app.post('/cargas/:id/asignar', verifyToken, requireRol('administrador'), asigna
 
 // HU 5 recomienda entre los postulados aptos; HU 6 conserva la asignación.
 app.get('/matching/:idCarga', verifyToken, requireRol('administrador'), matchingControllers.obtenerSugerencias);
+
+// HU 11: cada operación controla la participación en el viaje, además de la sesión.
+app.post('/calificaciones', verifyToken, calificacionControllers.crear);
+app.get('/cargas/:id/calificacion', verifyToken, calificacionControllers.consultarViaje);
+app.get('/usuarios/:id/reputacion', verifyToken, calificacionControllers.consultarPerfil);
 
 // Notificaciones (HU 12). Sin `requireRol`: administradores y camioneros
 // reciben avisos, y cada uno consulta y marca sólo los suyos.

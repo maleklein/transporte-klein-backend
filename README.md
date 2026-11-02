@@ -512,3 +512,8 @@ El matching aplicado a candidatos sintéticos en tablas temporales otorgó 22,53
 de 25 puntos de cercanía, sin advertencias. Se deshizo la transacción al terminar;
 no quedaron usuarios, cargas ni postulaciones de prueba en las tablas públicas.
 El registro detallado está en `docs/hu5-validacion-mapas.md`.
+
+## HU 11
+
+Calificaciones posteriores a la entrega: [reglas, fórmula, permisos y API](docs/hu11-reglas.md).
+En bases existentes aplicar una vez migrations/007_calificaciones.sql.
