@@ -65,6 +65,7 @@ app.get('/matching/:idCarga', verifyToken, requireRol('administrador'), matching
 // reciben avisos, y cada uno consulta y marca sólo los suyos.
 app.get('/notificaciones', verifyToken, notificacionControllers.listarNotificaciones);
 app.put('/notificaciones/:id/leida', verifyToken, notificacionControllers.marcarNotificacionLeida);
+app.put('/notificaciones/leidas', verifyToken, notificacionControllers.marcarTodasLeidas);
 
 // Panel de métricas (HU 13): sólo para administradores.
 app.get('/metricas', verifyToken, requireRol('administrador'), metricasControllers.obtenerMetricas);
