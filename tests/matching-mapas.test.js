@@ -25,7 +25,8 @@ test('matching reutiliza el módulo real de HU 9: coordenadas, km y puntaje', as
     t.mock.method(global, 'fetch', async (url, opciones) => {
         llamadas++;
         const peticion = new URL(url);
-        assert.equal(peticion.origin, 'https://api.openrouteservice.org');
+        assert.equal(peticion.origin, 'https://api.heigit.org');
+        assert.equal(peticion.pathname, '/openrouteservice/v2/directions/driving-car');
         assert.equal(peticion.searchParams.get('start'), '-60.527466,-31.740148');
         assert.equal(peticion.searchParams.get('end'), '-60.709996,-31.646557');
         assert.ok(opciones.headers.Authorization);

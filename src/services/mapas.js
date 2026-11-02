@@ -17,7 +17,7 @@
  * distancia por ruta de auto es un proxy razonable.
  */
 
-const URL_DIRECTIONS = 'https://api.openrouteservice.org/v2/directions/driving-car';
+const URL_DIRECTIONS = 'https://api.heigit.org/openrouteservice/v2/directions/driving-car';
 
 /** Si el proveedor tarda más que esto, se lo da por caído (RN-04). */
 const TIEMPO_LIMITE_MS = 5000;

@@ -340,6 +340,10 @@ La cercanía necesita la distancia **ubicación del camionero → origen**, no l
 kilómetros origen → destino de la carga. Se reutiliza `src/services/mapas.js`
 de HU 9: `obtenerDistanciaKm({lat, lon}, {lat, lon})` recibe **coordenadas**,
 no nombres. No se agrega otro proveedor ni se cambia la integración de HU 9.
+El módulo usa la dirección vigente del proveedor:
+`https://api.heigit.org/openrouteservice/v2/directions/driving-car`.
+La dirección anterior `api.openrouteservice.org` está retirada de servicio
+según el [aviso oficial de migración](https://ask.openrouteservice.org/t/reducing-the-quota-of-deprecated-api-api-openrouteservice-org/8013).
 
 `src/services/ubicacionMatching.js` convierte el texto de `CAMIONERO.ubicacion`
 a una localidad del catálogo local. Se ignoran diferencias de mayúsculas,
@@ -399,6 +403,9 @@ sembrar la base de uso:
   controladas, comprobando orden de coordenadas, conversión metros/km y puntaje.
 
 Con `MATCHING_DB_TEST=1`, la verificación inicial de esta integración pasó las
-54 comprobaciones. Eso no certifica el acceso al proveedor: falta configurar
-una clave válida en el entorno local y verificar al menos una ruta real entre
-localidades diferentes antes de cerrar la validación de mapas.
+54 comprobaciones. Además, el 02/11/2026 se verificó una consulta real usando
+la clave del `.env` local: Santa Fe → Paraná devolvió HTTP 200 y 29,62 km.
+El matching aplicado a candidatos sintéticos en tablas temporales otorgó 22,53
+de 25 puntos de cercanía, sin advertencias. Se deshizo la transacción al terminar;
+no quedaron usuarios, cargas ni postulaciones de prueba en las tablas públicas.
+El registro detallado está en `docs/hu5-validacion-mapas.md`.

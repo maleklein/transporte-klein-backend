@@ -21,7 +21,7 @@ test('circuito integrado: login → carga → postulaciones → mapas → rankin
     const peticionesMapas = [];
     t.mock.method(global, 'fetch', async (url, opciones) => {
         const peticion = new URL(url);
-        if (peticion.origin !== 'https://api.openrouteservice.org') return fetchHttp(url, opciones);
+        if (peticion.origin !== 'https://api.heigit.org') return fetchHttp(url, opciones);
         const inicio = peticion.searchParams.get('start');
         const fin = peticion.searchParams.get('end');
         assert.ok(inicio && fin && !`${inicio}${fin}`.includes('undefined'));
