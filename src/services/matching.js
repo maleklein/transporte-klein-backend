@@ -1,5 +1,7 @@
 const { PESOS, PARAMETROS, calcularPuntajes, motivosDescarte } = require('../domain/matching');
 const { ESTADOS_ABIERTOS } = require('../domain/estadosCarga');
+const { obtenerDistanciaKm } = require('./mapas');
+const { crearResolutorUbicacion, coordenadasValidas } = require('./ubicacionMatching');
 
 class ErrorMatching extends Error {
     constructor(message, estado) {
@@ -8,20 +10,8 @@ class ErrorMatching extends Error {
     }
 }
 
-/** HU 9 todavía no está integrada. Su ausencia no impide calcular otros criterios. */
-function obtenerProveedorDistancia() {
-    let ruta;
-    try {
-        ruta = require.resolve('./mapas');
-    } catch (error) {
-        if (error.code === 'MODULE_NOT_FOUND') return null;
-        throw error;
-    }
-    return require(ruta).obtenerDistanciaKm;
-}
-
 async function distanciaSegura(proveedor, ubicacion, origen, esperaMs) {
-    if (typeof proveedor !== 'function' || typeof ubicacion !== 'string' || !ubicacion.trim()) return null;
+    if (typeof proveedor !== 'function' || !ubicacion || !origen) return null;
     let temporizador;
     try {
         return await Promise.race([
@@ -37,6 +27,7 @@ async function distanciaSegura(proveedor, ubicacion, origen, esperaMs) {
 
 /**
  * Una consulta obtiene carga, postulaciones y conteos en la misma instantánea.
+ * Otra lee el catálogo de localidades para resolver los perfiles en texto.
  * No hay escrituras ni una consulta de historial por candidato. Las dependencias
  * opcionales permiten probar sin PostgreSQL y sin una API externa.
  */
@@ -49,6 +40,7 @@ async function calcularRanking(idCarga, opciones = {}) {
     const resultado = await db.query(
         `SELECT c.id_carga, c.peso_kg, c.estado_actual, c.id_camionero_asignado,
                 lo.nombre || ', ' || pr.nombre AS origen,
+                lo.id_localidad AS origen_id, lo.latitud AS origen_latitud, lo.longitud AS origen_longitud,
                 COALESCE((
                     SELECT json_agg(datos ORDER BY datos.id_camionero)
                     FROM (
@@ -84,16 +76,33 @@ async function calcularRanking(idCarga, opciones = {}) {
     }
 
     const proveedor = opciones.obtenerDistanciaKm === undefined
-        ? obtenerProveedorDistancia() : opciones.obtenerDistanciaKm;
+        ? obtenerDistanciaKm : opciones.obtenerDistanciaKm;
+    const origen = coordenadasValidas(carga.origen_latitud, carga.origen_longitud);
+    const hayAptos = carga.candidatos.some((c) => motivosDescarte(Number(carga.peso_kg), c).length === 0);
+    const catalogo = hayAptos && origen ? await db.query(
+        `SELECT l.id_localidad, l.nombre, l.departamento, p.nombre AS provincia, l.latitud, l.longitud
+         FROM LOCALIDAD l JOIN PROVINCIA p ON p.id_provincia = l.id_provincia`
+    ) : { rows: [] };
+    const resolver = crearResolutorUbicacion(catalogo.rows);
     const distancias = new Map();
     const candidatos = await Promise.all(carga.candidatos.map(async (candidato) => {
         if (motivosDescarte(Number(carga.peso_kg), candidato).length > 0) return candidato;
-        // La memoria dura solo esta consulta; cambios posteriores recalculan todo.
-        const ubicacion = candidato.ubicacion?.trim() ?? '';
-        if (!distancias.has(ubicacion)) {
-            distancias.set(ubicacion, distanciaSegura(proveedor, ubicacion, carga.origen, opciones.esperaMs ?? 5000));
+        if (!origen) return { ...candidato, distancia_km: null, motivo_distancia: 'El origen de la carga no tiene coordenadas válidas.' };
+        const ubicacion = resolver(candidato.ubicacion);
+        if (!ubicacion.coordenadas) {
+            return { ...candidato, distancia_km: null, motivo_distancia: ubicacion.advertencia };
         }
-        return { ...candidato, distancia_km: await distancias.get(ubicacion) };
+        // La memoria dura solo esta consulta; cambios posteriores recalculan todo.
+        const idLocalidad = ubicacion.localidad.id_localidad;
+        if (!distancias.has(idLocalidad)) {
+            const mismaLocalidad = idLocalidad === carga.origen_id?.trim();
+            distancias.set(idLocalidad, mismaLocalidad ? Promise.resolve(0)
+                : distanciaSegura(proveedor, ubicacion.coordenadas, origen, opciones.esperaMs ?? 5000));
+        }
+        return {
+            ...candidato, distancia_km: await distancias.get(idLocalidad),
+            ubicacion_resuelta: ubicacion.localidad,
+        };
     }));
     return {
         id_carga: id,

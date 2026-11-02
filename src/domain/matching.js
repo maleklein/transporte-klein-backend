@@ -65,7 +65,7 @@ function calcularPuntajes(carga, candidatos) {
         const explicaciones = {
             capacidad: `Capacidad de ${capacidad} kg para una carga de ${peso} kg.`,
             cercania: distanciaValida
-                ? `Distancia estimada al origen: ${redondear(distancia)} km.`
+                ? `Distancia estimada por ruta entre localidades: ${redondear(distancia)} km hasta el origen.`
                 : 'Distancia no disponible; cercanía aporta cero puntos.',
             disponibilidad: 'Disponibilidad declarada confirmada.',
             historial: `${entregas} viajes entregados registrados; mide experiencia, no reputación.`,
@@ -78,6 +78,7 @@ function calcularPuntajes(carga, candidatos) {
             apellido: candidato.apellido,
             tipo_vehiculo: candidato.tipo_vehiculo,
             ubicacion: candidato.ubicacion,
+            ubicacion_resuelta: candidato.ubicacion_resuelta ?? null,
             capacidad_kg: capacidad,
             disponibilidad: true,
             viajes_entregados: entregas,
@@ -88,7 +89,7 @@ function calcularPuntajes(carga, candidatos) {
                 maximo: PESOS[criterio],
                 explicacion: explicaciones[criterio],
             }])),
-            advertencias: distanciaValida ? [] : ['No se pudo calcular la distancia al origen.'],
+            advertencias: distanciaValida ? [] : [candidato.motivo_distancia ?? 'No se pudo calcular la distancia al origen.'],
         });
     }
 
