@@ -11,6 +11,7 @@ const metricasControllers = require('./src/controllers/metricasControllers');
 const postulacionControllers = require('./src/controllers/postulacionControllers');
 const asignacionControllers = require('./src/controllers/asignacionControllers');
 const matchingControllers = require('./src/controllers/matchingControllers');
+const parametrosControllers = require('./src/controllers/parametrosControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
 const app = express();
@@ -67,6 +68,10 @@ app.put('/notificaciones/:id/leida', verifyToken, notificacionControllers.marcar
 
 // Panel de métricas (HU 13): sólo para administradores.
 app.get('/metricas', verifyToken, requireRol('administrador'), metricasControllers.obtenerMetricas);
+
+// Parámetros de la fórmula de costos (HU 10): sólo para administradores.
+app.get('/parametros-operativos', verifyToken, requireRol('administrador'), parametrosControllers.obtenerParametros);
+app.put('/parametros-operativos', verifyToken, requireRol('administrador'), parametrosControllers.actualizarParametros);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;

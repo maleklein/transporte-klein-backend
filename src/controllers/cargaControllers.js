@@ -1,7 +1,7 @@
 /**
- * Controlador del módulo de Cargas (HU 2.1 + 2.1.1 + 2.2 + 3 + 7 + 8 + 9 + 12).
+ * Controlador del módulo de Cargas (HU 2.1 + 2.1.1 + 2.2 + 3 + 7 + 8 + 9 + 10 + 12).
  * Expone el alta, la edición, la consulta, el cambio de estado y el cálculo de
- * kilómetros de las cargas.
+ * kilómetros y de la estimación económica de las cargas.
  */
 
 const pool = require('../db');
@@ -10,6 +10,7 @@ const { registrarCambioEstado } = require('../services/registrarCambioEstado');
 const { obtenerDistanciaKm } = require('../services/mapas');
 const { notificarCargaNueva } = require('../services/notificaciones');
 const { COLUMNAS_UBICACION, JOIN_UBICACION } = require('../services/ubicacionCarga');
+const { COLUMNAS_COSTOS, CAMPOS_COSTOS, estimarCostos } = require('../services/parametrosOperativos');
 const {
     ESTADOS,
     ESTADOS_VALIDOS,
@@ -48,6 +49,19 @@ const ESTADOS_CALCULO_KM = {
  */
 const COLUMNAS_DISTANCIA = `
                     c.kilometros_estimados, c.estado_calculo_km`;
+
+/**
+ * Los tres valores económicos que se guardan en CARGA (HU 10), en el orden en
+ * que van en los INSERT y UPDATE. Sin estimación, los tres quedan en NULL.
+ *
+ * @param {Awaited<ReturnType<typeof estimarCostos>>} costos
+ * @returns {[number|null, number|null, object|null]} costo, ganancia y parámetros usados.
+ */
+const valoresCostos = (costos) => [
+    costos?.costo_estimado ?? null,
+    costos?.ganancia_estimada ?? null,
+    costos?.parametros ?? null,
+];
 
 /**
  * Verifica que las dos localidades del body existan en el catálogo.
@@ -135,6 +149,9 @@ const calcularKmEntreLocalidades = async (idOrigen, idDestino) => {
  * de mapas no responde, la carga se crea igual con `estado_calculo_km` en
  * 'pendiente' (RN-04): el alta nunca falla por culpa del proveedor.
  *
+ * Con los kilómetros estima también costo y ganancia (HU 10). Sin kilómetros
+ * quedan en NULL, y tampoco un problema con los parámetros frena el alta.
+ *
  * Respuestas: 201 con la carga creada · 400 si hay campos inválidos ·
  * 500 ante un error inesperado. El 401 (sin token) y el 403 (rol o cuenta
  * inactiva) los resuelven los middlewares antes de llegar acá.
@@ -163,6 +180,8 @@ const crearCarga = async (req, res) => {
         console.error('No se pudieron leer las coordenadas para calcular la distancia:', error.message);
     }
     const estadoCalculoKm = kilometros === null ? ESTADOS_CALCULO_KM.PENDIENTE : ESTADOS_CALCULO_KM.OK;
+    // También antes de la transacción: ver `estimarCostos`.
+    const costos = await estimarCostos(kilometros);
 
     // Transacción porque el alta son dos escrituras: la carga y su primer
     // registro en la bitácora. Si la segunda fallara, la carga no puede quedar
@@ -188,8 +207,9 @@ const crearCarga = async (req, res) => {
         // catálogo, todo en una sola ida a la base.
         const resultado = await client.query(
             `WITH nueva AS (
-                 INSERT INTO CARGA (id_localidad_origen, id_localidad_destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador, kilometros_estimados, estado_calculo_km)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 INSERT INTO CARGA (id_localidad_origen, id_localidad_destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador, kilometros_estimados, estado_calculo_km,
+                                    costo_estimado, ganancia_estimada, parametros_costo)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
                  RETURNING *
              )
              SELECT c.id_carga,${COLUMNAS_UBICACION},
@@ -197,7 +217,7 @@ const crearCarga = async (req, res) => {
                     -- Sin el TO_CHAR, el driver convierte el DATE a un Date de JS usando
                     -- la zona horaria local y el front termina recibiendo un timestamp.
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
-                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},${COLUMNAS_COSTOS},
                     c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM nueva c${JOIN_UBICACION}`,
             // Los valores ya vienen limpios y normalizados de validarCampos.
@@ -212,6 +232,7 @@ const crearCarga = async (req, res) => {
                 req.usuario.id,
                 kilometros,
                 estadoCalculoKm,
+                ...valoresCostos(costos),
             ]
         );
 
@@ -361,7 +382,7 @@ const obtenerCarga = async (req, res) => {
                     -- un Date de JS corrido por la zona horaria local.
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
                     c.observaciones,
-                    c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.estado_actual,${COLUMNAS_DISTANCIA},${COLUMNAS_COSTOS},
                     c.id_camionero_asignado
              FROM CARGA c${JOIN_UBICACION}
              WHERE c.id_carga = $1`,
@@ -385,6 +406,14 @@ const obtenerCarga = async (req, res) => {
             req.usuario?.rol === 'camionero' && carga.id_camionero_asignado !== req.usuario.id;
         if (esCamioneroAjeno && !ESTADOS_ABIERTOS.includes(carga.estado_actual)) {
             return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
+        }
+
+        // La estimación económica (HU 10) es del negocio: tarifa, costo y
+        // margen no son datos para el camionero, ni siquiera de su viaje.
+        if (req.usuario?.rol !== 'administrador') {
+            for (const campo of CAMPOS_COSTOS) {
+                delete carga[campo];
+            }
         }
 
         return res.status(200).json(carga);
@@ -460,6 +489,10 @@ const obtenerHistorialCarga = async (req, res) => {
  * recorrido. Si la ruta no cambió no se consulta al proveedor: los kilómetros
  * siguen valiendo y cada consulta gasta cuota.
  *
+ * La estimación económica (HU 10) sigue a los kilómetros: se recalcula con los
+ * parámetros vigentes sólo si cambió la ruta. Si no, se conserva la foto que
+ * ya tenía la carga, aunque los parámetros hayan cambiado desde entonces.
+ *
  * Respuestas: 200 con la carga actualizada · 400 si `id` no es numérico o hay
  * campos inválidos · 404 si no existe una carga con ese id · 409 si la carga
  * está en un estado que ya no admite edición · 500 ante un error inesperado.
@@ -525,21 +558,26 @@ const actualizarCarga = async (req, res) => {
 
         let kilometros = null;
         let estadoCalculoKm = null;
+        let costos = null;
         if (cambioRuta) {
             kilometros = await calcularKmEntreLocalidades(valores.origen_id, valores.destino_id);
             estadoCalculoKm = kilometros === null ? ESTADOS_CALCULO_KM.PENDIENTE : ESTADOS_CALCULO_KM.OK;
+            costos = await estimarCostos(kilometros);
         }
 
         // Mismo CTE que en el alta: el UPDATE no puede hacer JOIN en su
         // RETURNING, así que se vuelve a leer la fila ya resuelta.
         // Con $8 en false (la ruta no cambió) los CASE dejan los kilómetros
-        // como estaban.
+        // y la estimación económica como estaban.
         const resultado = await pool.query(
             `WITH modificada AS (
                  UPDATE CARGA
                  SET id_localidad_origen = $1, id_localidad_destino = $2, tipo_carga = $3, peso_kg = $4, fecha = $5, observaciones = $6,
                      kilometros_estimados = CASE WHEN $8 THEN $9::numeric ELSE kilometros_estimados END,
-                     estado_calculo_km = CASE WHEN $8 THEN $10::varchar ELSE estado_calculo_km END
+                     estado_calculo_km = CASE WHEN $8 THEN $10::varchar ELSE estado_calculo_km END,
+                     costo_estimado = CASE WHEN $8 THEN $11::numeric ELSE costo_estimado END,
+                     ganancia_estimada = CASE WHEN $8 THEN $12::numeric ELSE ganancia_estimada END,
+                     parametros_costo = CASE WHEN $8 THEN $13::jsonb ELSE parametros_costo END
                  WHERE id_carga = $7
                  RETURNING *
              )
@@ -548,7 +586,7 @@ const actualizarCarga = async (req, res) => {
                     -- Mismo criterio que en el alta: sin TO_CHAR el driver devuelve
                     -- un Date de JS corrido por la zona horaria local.
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
-                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},${COLUMNAS_COSTOS},
                     c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM modificada c${JOIN_UBICACION}`,
             [
@@ -562,6 +600,7 @@ const actualizarCarga = async (req, res) => {
                 cambioRuta,
                 kilometros,
                 estadoCalculoKm,
+                ...valoresCostos(costos),
             ]
         );
 
@@ -677,7 +716,7 @@ const cambiarEstadoCarga = async (req, res) => {
              SELECT c.id_carga,${COLUMNAS_UBICACION},
                     c.tipo_carga, c.peso_kg,
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
-                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},${COLUMNAS_COSTOS},
                     c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM modificada c${JOIN_UBICACION}`,
             [estadoNuevo, idCarga]
@@ -796,7 +835,7 @@ const cancelarCarga = async (req, res) => {
              SELECT c.id_carga,${COLUMNAS_UBICACION},
                     c.tipo_carga, c.peso_kg,
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
-                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},${COLUMNAS_COSTOS},
                     c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM modificada c${JOIN_UBICACION}`,
             [ESTADOS.CANCELADA, idCarga]
@@ -826,6 +865,10 @@ const cancelarCarga = async (req, res) => {
  *
  * No escribe en la bitácora de ESTADO_CARGA: recalcular la distancia no es un
  * cambio de estado de la carga.
+ *
+ * Con los kilómetros nuevos estima también costo y ganancia (HU 10), con los
+ * parámetros vigentes en este momento: es la primera vez que la carga tiene
+ * con qué hacer la cuenta.
  *
  * Respuestas: 200 con la carga actualizada · 400 si `id` no es numérico ·
  * 404 si no existe la carga · 503 si el servicio de mapas no respondió ·
@@ -860,22 +903,25 @@ const recalcularKmCarga = async (req, res) => {
             });
         }
 
+        const costos = await estimarCostos(kilometros);
+
         // Mismo CTE que en la edición, para devolver la carga completa y que el
         // detalle se actualice sin volver a pedirla.
         const resultado = await pool.query(
             `WITH modificada AS (
                  UPDATE CARGA
-                 SET kilometros_estimados = $1, estado_calculo_km = $2
+                 SET kilometros_estimados = $1, estado_calculo_km = $2,
+                     costo_estimado = $4, ganancia_estimada = $5, parametros_costo = $6::jsonb
                  WHERE id_carga = $3
                  RETURNING *
              )
              SELECT c.id_carga,${COLUMNAS_UBICACION},
                     c.tipo_carga, c.peso_kg,
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
-                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},
+                    c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},${COLUMNAS_COSTOS},
                     c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM modificada c${JOIN_UBICACION}`,
-            [kilometros, ESTADOS_CALCULO_KM.OK, idCarga]
+            [kilometros, ESTADOS_CALCULO_KM.OK, idCarga, ...valoresCostos(costos)]
         );
 
         return res.status(200).json(resultado.rows[0]);
