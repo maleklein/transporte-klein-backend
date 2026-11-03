@@ -120,7 +120,43 @@ const marcarNotificacionLeida = async (req, res) => {
     }
 };
 
+/**
+ * PUT /notificaciones/leidas: marca como leídas todas las notificaciones del
+ * usuario del token que faltaban leer.
+ *
+ * Existe porque cada carga nueva le deja un aviso a cada camionero disponible:
+ * sin esto, para bajar el contador había que abrir una por una, incluso las de
+ * cargas que no le interesan. Es un solo UPDATE, y alcanza también a las que
+ * quedan fuera del tope de `GET /notificaciones`.
+ *
+ * No hay nada que validar del lado del cliente: no recibe parámetros, y la
+ * condición sobre `id_usuario` hace que nunca toque avisos de otro usuario.
+ * Si no había ninguna sin leer, responde 200 igual, con `marcadas: 0`.
+ *
+ * Respuestas: 200 con `{ marcadas }` · 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express.
+ * @param {import('express').Response} res - response de Express.
+ * @returns {Promise<void>}
+ */
+const marcarTodasLeidas = async (req, res) => {
+    try {
+        const resultado = await pool.query(
+            `UPDATE NOTIFICACION
+             SET leida = true
+             WHERE id_usuario = $1 AND leida = false`,
+            [req.usuario.id]
+        );
+
+        return res.status(200).json({ marcadas: resultado.rowCount });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+};
+
 module.exports = {
     listarNotificaciones,
     marcarNotificacionLeida,
+    marcarTodasLeidas,
 };

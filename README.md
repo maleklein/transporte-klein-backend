@@ -272,6 +272,7 @@ El de asignación lo dispara `POST /cargas/:id/asignar`, con
 |---|---|
 | `GET /notificaciones` | Las del usuario del token, la más nueva primero (100 como máximo). Con `?solo_no_leidas=true`, sólo las que faltan leer. |
 | `PUT /notificaciones/:id/leida` | Marca una como leída. Si es de otro usuario responde 404, igual que si no existiera. |
+| `PUT /notificaciones/leidas` | Marca como leídas todas las del usuario que faltaban leer. Responde `{ marcadas }`. |
 
 **El contador de no leídas se actualiza consultando `GET /notificaciones` cada
 30 segundos**, no porque el servidor lo empuje. Es una decisión, no una
