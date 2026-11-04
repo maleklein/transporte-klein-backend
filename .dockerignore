@@ -1,0 +1,14 @@
+node_modules/
+.env
+.git/
+.github/
+.vscode/
+.pi/
+.atl/
+openspec/
+docs/
+tests/
+seeds/
+coverage/
+lcov.info
+*.md
