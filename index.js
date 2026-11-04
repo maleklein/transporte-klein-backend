@@ -1,0 +1,94 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+
+const authControllers = require('./src/controllers/authControllers');
+const usuarioControllers = require('./src/controllers/usuarioControllers');
+const cargaControllers = require('./src/controllers/cargaControllers');
+const geografiaControllers = require('./src/controllers/geografiaControllers');
+const notificacionControllers = require('./src/controllers/notificacionControllers');
+const metricasControllers = require('./src/controllers/metricasControllers');
+const postulacionControllers = require('./src/controllers/postulacionControllers');
+const asignacionControllers = require('./src/controllers/asignacionControllers');
+const matchingControllers = require('./src/controllers/matchingControllers');
+const parametrosControllers = require('./src/controllers/parametrosControllers');
+const calificacionControllers = require('./src/controllers/calificacionControllers');
+const saludControllers = require('./src/controllers/saludControllers');
+const { verifyToken, requireRol } = require('./src/middlewares/auth');
+
+const app = express();
+
+//Middlewares (Configuraciones base)
+app.use(cors()); //Permite que el Frontend se comunique sin bloqueos
+app.use(express.json()); //Permite que el servidor lea el body en formato JSON
+
+// -- Rutas del sistema --
+
+// Rutas publicas
+app.post('/auth/login', authControllers.login);
+// Healthcheck del deploy en Railway: responde 200 solo si la base contesta.
+app.get('/health', saludControllers.verificarSalud);
+
+// Rutas de usuarios: administrar cuentas es tarea del administrador (HU 1.1, 1.2, 1.3).
+app.get('/usuarios', verifyToken, requireRol('administrador'), usuarioControllers.listarUsuarios);
+app.post('/usuarios', verifyToken, requireRol('administrador'), usuarioControllers.crearUsuario);
+app.put('/usuarios/:id', verifyToken, requireRol('administrador'), usuarioControllers.actualizarUsuario);
+
+// Catálogo geográfico: alimenta los selectores de provincia y localidad del
+// alta, la edición y el filtro del listado. Sin `requireRol` porque el filtro
+// lo usa cualquier usuario logueado, no sólo el administrador.
+app.get('/provincias', verifyToken, geografiaControllers.listarProvincias);
+app.get('/localidades', verifyToken, geografiaControllers.listarLocalidades);
+
+// Rutas de cargas.
+// Escribir (alta, edición, cambio de estado) es exclusivo del administrador.
+// Consultar queda abierto a cualquier usuario logueado, pero lo que ve depende
+// del rol: al camionero el controlador le devuelve sólo las cargas disponibles
+// o pendientes (HU 3), que son a las que se puede postular.
+app.post('/cargas', verifyToken, requireRol('administrador'), cargaControllers.crearCarga);
+app.get('/cargas', verifyToken, cargaControllers.listarCargas);
+app.get('/cargas/:id', verifyToken, cargaControllers.obtenerCarga);
+app.get('/cargas/:id/historial', verifyToken, cargaControllers.obtenerHistorialCarga);
+app.put('/cargas/:id', verifyToken, requireRol('administrador'), cargaControllers.actualizarCarga);
+app.patch('/cargas/:id/estado', verifyToken, requireRol('administrador'), cargaControllers.cambiarEstadoCarga);
+app.patch('/cargas/:id/cancelar', verifyToken, requireRol('administrador'), cargaControllers.cancelarCarga);
+app.post('/cargas/:id/recalcular-km', verifyToken, requireRol('administrador'), cargaControllers.recalcularKmCarga);
+
+// Postulaciones (HU 4). El camionero se postula y sigue las suyas; el
+// administrador ve quiénes se postularon a cada carga para asignarla (HU 6).
+app.post('/cargas/:id/postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.crearPostulacion);
+app.get('/cargas/:id/postulaciones', verifyToken, requireRol('administrador'), postulacionControllers.listarPostulantes);
+app.get('/postulaciones/mis-postulaciones', verifyToken, requireRol('camionero'), postulacionControllers.obtenerMisPostulaciones);
+// HU 6 - Asignar carga a camionero: elige entre los postulados de esa carga.
+app.post('/cargas/:id/asignar', verifyToken, requireRol('administrador'), asignacionControllers.asignarCamionero);
+
+// HU 5 recomienda entre los postulados aptos; HU 6 conserva la asignación.
+app.get('/matching/:idCarga', verifyToken, requireRol('administrador'), matchingControllers.obtenerSugerencias);
+
+// HU 11: cada operación controla la participación en el viaje, además de la sesión.
+app.post('/calificaciones', verifyToken, calificacionControllers.crear);
+app.get('/cargas/:id/calificacion', verifyToken, calificacionControllers.consultarViaje);
+app.get('/usuarios/:id/reputacion', verifyToken, calificacionControllers.consultarPerfil);
+
+// Notificaciones (HU 12). Sin `requireRol`: administradores y camioneros
+// reciben avisos, y cada uno consulta y marca sólo los suyos.
+app.get('/notificaciones', verifyToken, notificacionControllers.listarNotificaciones);
+app.put('/notificaciones/:id/leida', verifyToken, notificacionControllers.marcarNotificacionLeida);
+app.put('/notificaciones/leidas', verifyToken, notificacionControllers.marcarTodasLeidas);
+
+// Panel de métricas (HU 13): sólo para administradores.
+app.get('/metricas', verifyToken, requireRol('administrador'), metricasControllers.obtenerMetricas);
+
+// Parámetros de la fórmula de costos (HU 10): sólo para administradores.
+app.get('/parametros-operativos', verifyToken, requireRol('administrador'), parametrosControllers.obtenerParametros);
+app.put('/parametros-operativos', verifyToken, requireRol('administrador'), parametrosControllers.actualizarParametros);
+
+// Iniciar servidor
+const PORT = process.env.PORT || 3000;
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Servidor corriendo en el puerto ${PORT}`);
+    });
+}
+
+module.exports = app;
