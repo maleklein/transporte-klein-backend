@@ -250,6 +250,31 @@ openssl rand -base64 32
 
 ---
 
+## Cómo subir cambios
+
+`main` es la única rama de trabajo: de ahí salen las ramas nuevas y ahí vuelven
+por PR. `develop` ya no se usa.
+
+1. **Ramas dentro de este repo, no forks.** GitHub no les pasa los secrets a
+   los PRs que vienen de un fork, y sin el token el análisis de SonarQube falla.
+   Todos los del grupo tienen permiso de escritura, así que alcanza con
+   `git switch -c fix/lo-que-sea main`.
+2. **El nombre de la rama dice qué pasa al mergear:**
+   - `fix/...` para correcciones y cambios chicos. Al mergear a `main`, Railway
+     lo despliega.
+   - `release/...` para cerrar una versión. Antes de mergear, semantic-release
+     crea el tag con el número de versión.
+   - No usar otros nombres: el pipeline (tests y SonarQube) corre solo en esas dos.
+3. **Commits con prefijo:** `feat:` para algo nuevo y `fix:` para una
+   corrección (por ejemplo, `fix: el login no acepta emails con mayúsculas`).
+   De ahí saca semantic-release el número de versión: `feat` sube la versión
+   menor y `fix` la de parche.
+4. **PR hacia `main`**, con SonarQube en verde, y se mergea con
+   **Create a merge commit**, no con squash: el squash junta todo en un solo
+   commit y semantic-release pierde los prefijos.
+
+---
+
 ## Notificaciones (HU 12)
 
 El sistema deja un aviso en la tabla `NOTIFICACION` ante tres eventos:
