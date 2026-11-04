@@ -9,7 +9,8 @@ const { SECRETO, EXPIRACION } = require('../config/jwt'); //Config del JWT en un
  *
  * @param {import('express').Request} req - Body: { email, contraseña }.
  * @param {import('express').Response} res
- * @returns {Promise<import('express').Response>} 200 con { token, user }; 400 si
+ * @returns {Promise<import('express').Response>} 200 con { token, user }, donde
+ *   `user` trae el nombre y el apellido para que el front salude sin otro pedido; 400 si
  *   faltan datos; 401 si las credenciales no coinciden; 403 si la cuenta está
  *   inactiva; 500 ante un error inesperado.
  */
@@ -56,7 +57,13 @@ const login = async (req, res) => {
 
         return res.status(200).json({
             token,
-            user: { id: user.id_usuario, email: user.email, rol: user.rol }
+            user: {
+                id: user.id_usuario,
+                email: user.email,
+                rol: user.rol,
+                nombre: user.nombre,
+                apellido: user.apellido,
+            }
         });
 
     } catch (errorServidor) {
