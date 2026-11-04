@@ -250,6 +250,34 @@ openssl rand -base64 32
 
 ---
 
+## Tests
+
+```bash
+npm test                 # todos los tests
+npm run test:cobertura   # lo mismo, con la cobertura de cada archivo de la app
+```
+
+Sin base de datos corren los tests unitarios y los de HTTP con la base simulada,
+y se saltean los de integración (cuatro). Para correr también esos, hace falta
+el PostgreSQL del `.env` y estas variables:
+
+```bash
+MATCHING_DB_TEST=1 CALIFICACIONES_DB_TEST=1 ADMINISTRACION_DB_TEST=1 npm test
+```
+
+En PowerShell:
+
+```powershell
+$env:MATCHING_DB_TEST='1'; $env:CALIFICACIONES_DB_TEST='1'; $env:ADMINISTRACION_DB_TEST='1'; npm test
+```
+
+Ninguno toca los datos que ya hay en esa base: cada test de integración arma
+sus propias tablas (en un esquema con nombre aleatorio, como tablas temporales o
+dentro de una transacción que se deshace) y las descarta al terminar.
+El workflow de GitHub Actions los corre siempre, con un PostgreSQL 16 vacío.
+
+---
+
 ## Cómo subir cambios
 
 `main` es la única rama de trabajo: de ahí salen las ramas nuevas y ahí vuelven
