@@ -13,6 +13,7 @@ const asignacionControllers = require('./src/controllers/asignacionControllers')
 const matchingControllers = require('./src/controllers/matchingControllers');
 const parametrosControllers = require('./src/controllers/parametrosControllers');
 const calificacionControllers = require('./src/controllers/calificacionControllers');
+const saludControllers = require('./src/controllers/saludControllers');
 const { verifyToken, requireRol } = require('./src/middlewares/auth');
 
 const app = express();
@@ -25,6 +26,8 @@ app.use(express.json()); //Permite que el servidor lea el body en formato JSON
 
 // Rutas publicas
 app.post('/auth/login', authControllers.login);
+// Healthcheck del deploy en Railway: responde 200 solo si la base contesta.
+app.get('/health', saludControllers.verificarSalud);
 
 // Rutas de usuarios: administrar cuentas es tarea del administrador (HU 1.1, 1.2, 1.3).
 app.get('/usuarios', verifyToken, requireRol('administrador'), usuarioControllers.listarUsuarios);
