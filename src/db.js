@@ -10,5 +10,11 @@ const pool = new Pool({
     port: process.env.DB_PORT,
 });
 
+//Si PostgreSQL corta una conexión que estaba libre (se reinició la base, por ejemplo), el pool emite 'error'.
+//Sin este manejador ese evento tira abajo el proceso; con él, el pool descarta la conexión y abre otra en la próxima consulta.
+pool.on('error', (error) => {
+    console.error('PostgreSQL cortó una conexión libre:', error.code ?? error.name);
+});
+
 //Exportamos la conexión para usarla en los controladores y middlewares
 module.exports = pool;
