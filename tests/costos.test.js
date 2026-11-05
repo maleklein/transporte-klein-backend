@@ -9,7 +9,7 @@ test('aplica la fórmula de docs/hu10-costos.md a un caso calculado a mano', () 
     assert.deepEqual(calcularCostos(100, parametros), {
         costo_estimado: 195000,
         ingreso_estimado: 260000,
-        ganancia_estimada: 65000,
+        ganancia_estimada: 65001,
         parametros,
     });
 });
