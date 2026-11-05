@@ -275,6 +275,13 @@ por PR. `develop` ya no se usa.
 
 ---
 
+## Versionado automatico (GIA-70)
+
+La configuracion y el workflow reutilizable de semantic-release estan preparados.
+Falta conectar el job despues de Sonar en el workflow principal de GIA-61 y
+comprobar una publicacion real en GitHub. Las reglas, ejemplos de commits y
+pasos de integracion estan en [docs/gia70-versionado.md](docs/gia70-versionado.md).
+
 ## Notificaciones (HU 12)
 
 El sistema deja un aviso en la tabla `NOTIFICACION` ante tres eventos:
