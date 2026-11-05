@@ -29,6 +29,9 @@ producción y su contraseña se acordaron por separado; no están en este repo.
 Variables privadas, preparación de la base, comprobaciones y guía de demo:
 [docs/deploy-produccion.md](docs/deploy-produccion.md).
 
+Explicación paso a paso y preguntas para la presentación:
+[guía de exposición de Tomás](docs/etapa2-exposicion-tomas.md).
+
 ---
 
 ## Puesta en marcha
