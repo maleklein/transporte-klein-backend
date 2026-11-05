@@ -4,6 +4,27 @@ API del sistema de gestión de cargas. Node + Express + PostgreSQL.
 
 ---
 
+## Producción — etapa 2
+
+Backend publicado: **https://transporte-klein-backend-production.up.railway.app**.
+
+Comprobación pública: [GET /health](https://transporte-klein-backend-production.up.railway.app/health).
+Devuelve `200 {"estado":"ok"}` cuando PostgreSQL responde. La API no sirve el
+frontend; abrir la raíz del backend no muestra la aplicación React.
+
+El frontend se ejecuta en local apuntando a esa API. Desde su carpeta, en PowerShell:
+
+```powershell
+$env:VITE_API_URL='https://transporte-klein-backend-production.up.railway.app'
+npm run dev
+```
+
+La base de Railway es independiente de la base local. El administrador de
+producción y su contraseña se acordaron por separado; no están en este repo.
+
+Variables privadas, preparación de la base, comprobaciones y guía de demo:
+[docs/deploy-produccion.md](docs/deploy-produccion.md).
+
 ## Actualizar la base: costos y ganancia estimados (HU 10)
 
 **Una vez, cuando traigas esta rama.** Sin la tabla nueva, la pantalla de
@@ -305,9 +326,9 @@ por PR. `develop` ya no se usa.
 
 ## Versionado automatico (GIA-70)
 
-La configuracion y el workflow reutilizable de semantic-release estan preparados.
-Falta conectar el job despues de Sonar en el workflow principal de GIA-61 y
-comprobar una publicacion real en GitHub. Las reglas, ejemplos de commits y
+El workflow principal ya llama a semantic-release despues de Sonar mediante
+`needs: sonar-validation` (PR #37). La publicacion real se verifica desde una
+rama `release/*`. Las reglas, ejemplos de commits y
 pasos de integracion estan en [docs/gia70-versionado.md](docs/gia70-versionado.md).
 
 ## Notificaciones (HU 12)
