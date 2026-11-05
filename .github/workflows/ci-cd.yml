@@ -1,0 +1,96 @@
+name: CI/CD Pipeline
+
+# Una sola puerta de entrada: PRs hacia main desde ramas fix/ o release/.
+# El push a main (al mergear) analiza main y es lo que Railway espera ("Wait for CI")
+# antes de desplegar.
+on:
+  pull_request:
+    branches: [main]
+    # Sin `closed`: dispararía también al cerrar un PR sin mergear.
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sonar-validation:
+    # PR desde fix/ o release/ (antes de mergear), o push a main (después de mergear).
+    if: >
+      github.event_name == 'push' ||
+      startsWith(github.head_ref, 'fix/') ||
+      startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-latest
+
+    # Los tests de integración (matching y calificaciones) necesitan PostgreSQL.
+    # Cada uno arma sus propias tablas: alcanza con una base vacía.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: klein
+          POSTGRES_PASSWORD: klein_ci
+          POSTGRES_DB: transporte_klein_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U klein"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout (historial completo para Sonar)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Tests con cobertura
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: klein
+          DB_PASSWORD: klein_ci
+          DB_NAME: transporte_klein_test
+          MATCHING_DB_TEST: '1'
+          CALIFICACIONES_DB_TEST: '1'
+          ADMINISTRACION_DB_TEST: '1'
+        # Si falla un test, el job termina acá: no se analiza ni se publica versión.
+        run: >
+          node --test --experimental-test-coverage --test-coverage-exclude='tests/**'
+          --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=lcov --test-reporter-destination=lcov.info
+          tests/*.test.js
+
+      - name: Análisis de SonarQube Cloud
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # La organización y el proyecto están en sonar-project.properties.
+          # En los PRs espera el Quality Gate: si no pasa, el job falla y el PR queda bloqueado.
+          args: >
+            -Dsonar.qualitygate.wait=${{ github.event_name == 'pull_request' }}
+
+  # GIA-70: versión y Release de las ramas release/, solo si sonar-validation pasó
+  # (tests y Quality Gate). El job vive en release-version.yml; acá solo se llama.
+  create-release-version:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.base_ref == 'main' &&
+      startsWith(github.head_ref, 'release/') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: sonar-validation
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-version.yml
