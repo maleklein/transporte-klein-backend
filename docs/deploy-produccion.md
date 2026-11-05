@@ -1,6 +1,6 @@
 # Deploy de producción y demo — Transporte Klein
 
-Responsable: Tomás Caussa. Verificaciones iniciadas el 05/11/2026.
+Responsable: Tomás Caussa. Verificaciones del 05/11/2026.
 
 ## Arquitectura de la entrega
 
@@ -148,9 +148,21 @@ conclusiones de los workflows de GitHub, no los checks de otras apps.
 ## Versionado — GIA-70
 
 El PR #37 conectó el workflow reutilizable de Tomás después de Sonar.
-Ver [reglas y condiciones](gia70-versionado.md). Se debe comprobar una publicación
-real desde `release/etapa2-produccion`; el resultado se añadirá tras la ejecución.
-Un tag o Release no equivale a un deploy, ni hace el merge del PR.
+Ver [reglas y condiciones](gia70-versionado.md).
+
+La prueba real se ejecutó en el [PR #39](https://github.com/maleklein/transporte-klein-backend/pull/39),
+desde `release/etapa2-produccion` hacia `main`:
+
+- [Ejecución del pipeline](https://github.com/maleklein/transporte-klein-backend/actions/runs/42064863562):
+  `sonar-validation` y `create-release-version / create-release-version` en success.
+- [Release v1.0.0](https://github.com/maleklein/transporte-klein-backend/releases/tag/v1.0.0),
+  publicada automáticamente por semantic-release.
+- El tag v1.0.0 apunta a `a74d0c6de92bfc3411712d63ccdbf736980d1cd9`, el HEAD
+  evaluado del PR. Se comprobó por la API de referencias de GitHub.
+- No se creó ningún tag manual ni se publicó el backend en npm.
+
+Un tag o Release no equivale a un deploy ni hace el merge del PR. GIA-70 se
+completó; GIA-56/GIA-68 conservan los pendientes de integración con Railway.
 
 ## Evidencia y pendientes de demo — GIA-68
 
@@ -161,11 +173,13 @@ Un tag o Release no equivale a un deploy, ni hace el merge del PR.
 | `/cargas` sin token | 401 |
 | `/auth/login` con contraseña incorrecta | 401 |
 | CORS desde `http://localhost:5173` | Respuesta permite el origen (`*`) |
-| Login correcto desde el frontend | Pendiente: contraseña ingresada por su titular |
-| Mapas desde el contenedor activo | Pendiente de comprobar después de aplicar las variables |
+| Login correcto desde el frontend | Tomás confirmó el ingreso con la cuenta de producción; contraseña ingresada privadamente |
+| Frontend de la demo | Copia local actualizada a `origin/main` (`faf49a5`), sin cambios de código; contiene el panel de administrador completo |
+| Mapas desde Railway | Script real `probar-mapas.js`: Santa Fe → Paraná, 29,62 km; consulta privada a PostgreSQL y proveedor real |
+| Redeploy para aplicar variables | `f840a1bc-91f4-4511-bfa6-ad8510c95b34`, SUCCESS; `/health` nuevamente 200 |
 | Auto-deploy y Wait for CI | Pendientes del acceso GitHub reconocido por Railway |
-| Tag y Release reales | Pendientes de ejecutar el PR de lanzamiento |
-| Flujo completo de demo | Pendiente del login y de datos de demostración acordados |
+| Tag y Release reales | v1.0.0 publicada automáticamente; SHA del tag verificado |
+| Flujo completo de demo | Login confirmado; falta ensayar las operaciones con datos de demostración acordados |
 
 Guion para una computadora:
 

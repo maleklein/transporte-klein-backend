@@ -106,6 +106,10 @@ pendientes en el entorno real.
 
 ## Prueba final en GitHub
 
+Completada el 05/11/2026 en el PR #39: Sonar y el job de versionado pasaron.
+Se publicó automáticamente v1.0.0 sobre el commit a74d0c6. La ejecución, el tag
+y las verificaciones están registrados en [deploy-produccion.md](deploy-produccion.md#versionado--gia-70).
+
 La comprobacion real crea un tag y una Release; no es una simulacion.
 
 1. Integrar el workflow de GIA-61 y el llamado anterior mediante PR revisado.
