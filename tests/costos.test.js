@@ -4,7 +4,7 @@ const { calcularCostos } = require('../src/services/costos');
 
 const parametros = { costo_por_km: 1800, peaje_por_km: 150, tarifa_por_km: 2600 };
 
-test('aplica la fórmula del README a un caso calculado a mano', () => {
+test('aplica la fórmula de docs/hu10-costos.md a un caso calculado a mano', () => {
     // 100 km: costo 100 × (1800 + 150) = 195.000; ingreso 100 × 2600 = 260.000.
     assert.deepEqual(calcularCostos(100, parametros), {
         costo_estimado: 195000,

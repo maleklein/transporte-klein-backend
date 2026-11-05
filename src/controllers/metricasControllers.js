@@ -3,9 +3,9 @@
  *
  * Un solo endpoint, `GET /metricas`, que agrega toda la bitácora `ESTADO_CARGA`
  * (y `CARGA` para "cargas por estado") dentro de un período. Las definiciones
- * de cada indicador están documentadas en el README, sección "Métricas (HU 13)":
- * este archivo las repite junto a cada consulta para que el código y el
- * README no diverjan, pero si hay alguna diferencia el README es la fuente
+ * de cada indicador están documentadas en `docs/hu13-metricas.md`: este
+ * archivo las repite junto a cada consulta para que el código y ese documento
+ * no diverjan, pero si hay alguna diferencia el documento es la fuente
  * de verdad.
  *
  * Todo se calcula con SQL agregado y parametrizado — nada de traer las cargas
@@ -111,8 +111,7 @@ const resolverPeriodo = (query) => {
  * son `timestamp without time zone`, así que se comparan tal cual están
  * guardadas.
  *
- * Cada indicador replica la definición de la sección "Métricas (HU 13)" del
- * README:
+ * Cada indicador replica la definición de `docs/hu13-metricas.md`:
  *
  * - `cargas_por_estado` / `total_cargas`: cargas cuyo `creado_en` cae en el
  *   período, agrupadas por `estado_actual` DE HOY (no por el estado que
