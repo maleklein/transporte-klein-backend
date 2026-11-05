@@ -53,7 +53,7 @@ repositorio por SQL en otra transacción, con las mismas columnas y política
 `ON CONFLICT DO UPDATE` del script de siembra. El acceso se realizó mediante un
 túnel SSH de Railway y `psql`, sin exponer PostgreSQL a Internet.
 
-Resultados verificados: 10 tablas, 24 provincias, 4.027 localidades con
+Resultados de la inicialización: 10 tablas, 24 provincias, 4.027 localidades con
 coordenadas, 3 parámetros operativos y un administrador activo. Su contraseña se
 ingresó privadamente y se guardó como hash bcrypt con costo 10. No se cargó
 `seeds/metricas_datos_prueba.sql` ni se copiaron usuarios de la base de desarrollo.
@@ -98,9 +98,13 @@ Si el mismo problema vuelve a ocurrir, revisar con la cuenta autorizada:
 5. Hacer un merge aprobado y comprobar un despliegue nuevo asociado a ese SHA,
    posterior a los checks de GitHub. Registrar el enlace/ID del despliegue.
 
-La configuración automática ya está activa. Falta comprobar un despliegue
-automático posterior a un merge aprobado; el primer despliegue manual exitoso
-no es evidencia de esa ejecución.
+La configuración automática está activa y fue comprobada con el merge aprobado
+del PR #41. El commit `356d8d5da5c2a7062a8227a9f2a2f8c983dc97da` disparó
+[CI en main](https://github.com/maleklein/transporte-klein-backend/actions/runs/42073071145).
+Railway creó automáticamente el despliegue `93bcdfb7-2987-481a-9c3d-a3f769cc056a`
+para el mismo SHA: se observó `WAITING` durante CI y luego `SUCCESS`.
+Después del deploy, `/health` volvió a responder 200 y `/cargas` sin token 401.
+No se ejecutó un redeploy manual para esta prueba.
 
 [Requisitos oficiales de auto-deploy y Wait for CI](https://docs.railway.com/deployments/github-autodeploys).
 
@@ -168,24 +172,62 @@ desde `release/etapa2-produccion` hacia `main`:
 - No se creó ningún tag manual ni se publicó el backend en npm.
 
 Un tag o Release no equivale a un deploy ni hace el merge del PR. GIA-70 se
-completó; GIA-56/GIA-68 conservan la comprobación del auto-deploy por merge.
+completó y el auto-deploy por merge de GIA-56 también quedó verificado.
+En el PR #41, el job se ejecutó otra vez con commits solo `docs:` y finalizó
+correctamente sin crear una versión nueva. Se conserva una única Release v1.0.0.
 
-## Evidencia y pendientes de demo — GIA-68
+## Evidencia de deploy y demo — GIA-68
 
-| Comprobación | Resultado inicial del 05/11/2026 |
+| Comprobación | Resultado verificado del 05/11/2026 |
 |---|---|
 | Primer deploy y arranque | `SUCCESS`, servidor en el puerto asignado 8080 |
 | HTTPS `/health` | 200, `{"estado":"ok"}`; PostgreSQL responde |
 | `/cargas` sin token | 401 |
 | `/auth/login` con contraseña incorrecta | 401 |
 | CORS desde `http://localhost:5173` | Respuesta permite el origen (`*`) |
-| Login correcto desde el frontend | Tomás confirmó el ingreso con la cuenta de producción; contraseña ingresada privadamente |
+| Login correcto desde el frontend | Administrador y dos camioneros ingresaron correctamente contra producción; cierre de sesión verificado |
 | Frontend de la demo | Copia local actualizada a `origin/main` (`faf49a5`), sin cambios de código; contiene el panel de administrador completo |
 | Mapas desde Railway | Script real `probar-mapas.js`: Santa Fe → Paraná, 29,62 km; consulta privada a PostgreSQL y proveedor real |
 | Redeploy para aplicar variables | `f840a1bc-91f4-4511-bfa6-ad8510c95b34`, SUCCESS; `/health` nuevamente 200 |
-| Auto-deploy y Wait for CI | Trigger de main activo, checkSuites true; pendiente comprobar el despliegue automático por merge |
+| Auto-deploy y Wait for CI | Trigger de main activo, checkSuites true; PR #41 produjo WAITING → SUCCESS en Railway para el mismo SHA de main |
 | Tag y Release reales | v1.0.0 publicada automáticamente; SHA del tag verificado |
-| Flujo completo de demo | Login confirmado; falta ensayar las operaciones con datos de demostración acordados |
+| Flujo completo de demo | Carga Demo etapa 2 publicada, dos postulaciones, ranking, asignación, avisos, entrega y calificaciones mutuas verificados |
+
+### Ensayo funcional realizado en una computadora
+
+Se crearon dos camioneros de demostración a pedido de Tomás. No se copiaron
+usuarios, contraseñas ni viajes de la base local. Los datos de acceso se
+mantienen fuera de esta documentación.
+
+Para conservar sesiones independientes se usó `http://localhost:5174` para el
+administrador y `http://127.0.0.1:5174` para el camionero, ambos con el mismo
+frontend local conectado a Railway. Son orígenes distintos para el navegador.
+
+| Paso observado | Resultado |
+|---|---|
+| Formulario vacío de carga | Errores debajo de los campos; no se creó un registro incompleto |
+| Publicación | Viaje #1, tipo Demo etapa 2, Santa Fe → Paraná, 1.000 kg, retiro 06/11/2026; disponible para los camioneros |
+| Distancia de la carga | Proveedor real: 29,62 km; la pantalla redondea a 30 km |
+| Postulaciones | Ambos camioneros se postularon; la primera postulación pasó la carga a pendiente |
+| Sugerencias | Primero: 61/100, capacidad 2.500 kg y ubicación Santa Fe. Segundo: 50,51/100, capacidad 5.000 kg y ubicación Paraná |
+| Desglose del segundo | Capacidad 8/40, cercanía 22,51/25, disponibilidad 20/20, experiencia 0/15; ruta Paraná → Santa Fe de 29,89 km |
+| Asignación | Se eligió al primero; su postulación quedó elegida y la otra no elegida |
+| Avisos | El segundo recibió el aviso de postulación no elegida; también se verificó el aviso de carga nueva |
+| Estados e historial | Disponible → pendiente → aceptada → en viaje → entregada; cinco registros de historial |
+| Calificaciones | Creador y camionero asignado se calificaron con 5/5 y comentarios identificados como demo |
+| Reputación | Ambos perfiles muestran 5,00/5, una calificación recibida y una utilizada; el formulario enviado se reemplaza por la evaluación registrada |
+| Métricas | Una carga, una entrega, cumplimiento 100 % y un camionero con viaje |
+| Consola del navegador | Sin errores capturados en las dos sesiones al finalizar el circuito |
+
+Los 29,62 km corresponden al viaje de la carga; los 29,89 km del ranking son
+el acercamiento del segundo camionero al origen en el sentido contrario. No
+son la misma consulta de ruta. El caso de demo se entregó durante el ensayo,
+antes de su fecha programada; representa una simulación, no un transporte real.
+
+Los dos camioneros y el viaje se conservaron en producción con autorización de
+Tomás. No se ejecutaron los bancos automatizados contra esta base. Este ensayo
+comprueba el circuito descrito; no reemplaza la suite de tests ni demuestra
+ausencia de fallos en todos los escenarios.
 
 Guion para una computadora:
 
@@ -198,6 +240,19 @@ Guion para una computadora:
 6. Usar otra sesión independiente para el camionero.
 7. Mostrar el auto-deploy después de un merge aprobado y repetir `/health`.
 
-Las tareas se contrastaron con GIA-56, GIA-67, GIA-68 y GIA-70 de Linear.
-No se recibió en este workspace un PDF original adicional del profesor para
-certificar otros requisitos fuera de ese reparto.
+Las tareas se contrastaron con GIA-56, GIA-67, GIA-68 y GIA-70 de Linear,
+`tareas-linear-etapa2_md.pdf` y la foto del pizarrón aportados por Tomás.
+Tomás confirmó que esas son todas las referencias de consigna disponibles.
+
+| Requisito del reparto de Tomás | Evidencia |
+|---|---|
+| GIA-67: tablas, localidades y primer administrador | Base inicializada y cantidades verificadas; contraseña bcrypt |
+| GIA-56: deploy del backend | HTTPS, healthcheck, variables privadas, login confirmado y auto-deploy probado |
+| GIA-70: tag automático en ramas release/ | v1.0.0 y ejecución posterior sin duplicado por cambios docs |
+| GIA-68: documentación y demo | Esta guía, README, guion de exposición y ensayo funcional registrado en la sección anterior |
+
+La foto también menciona Android Studio, una app Android, RabbitMQ, Kafka y
+serverless. El reparto disponible no asigna esas implementaciones a estas cuatro
+tareas del backend; no se presentan como realizadas en este cierre.
+
+Para preparar la explicación oral, ver [la guía de exposición de Tomás](etapa2-exposicion-tomas.md).
