@@ -6,6 +6,8 @@ Cada cambio entra a `main` por un PR que pasa por GitHub Actions (tests y
 SonarQube); las ramas `release/` además generan una versión. El detalle de cada
 funcionalidad está en [`docs/`](#documentación-de-cada-funcionalidad).
 
+---
+
 ## Producción — etapa 2
 
 Backend publicado: **https://transporte-klein-backend-production.up.railway.app**.
