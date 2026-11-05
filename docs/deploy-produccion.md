@@ -72,7 +72,7 @@ Configurado en el servicio:
 La configuración sin suspensión no promete disponibilidad ininterrumpida: hay
 que mantener el proyecto, el plan y los créditos de Railway y revisar incidentes.
 
-### Auto-deploy y Wait for CI: bloqueo detectado
+### Auto-deploy y Wait for CI
 
 El primer despliegue desde GitHub pudo descargar el repo público y quedó
 `SUCCESS`, pero Railway no permitió crear el trigger automático:
@@ -83,7 +83,12 @@ No significa que falten permisos Git en la PC. Railway necesita que al menos un
 miembro del proyecto conecte su cuenta GitHub con acceso de colaborador al repo,
 y que la GitHub App de Railway esté autorizada para ese repositorio.
 
-Pasos para resolverlo con la cuenta autorizada:
+El acceso se resolvió después de que Malena actualizó la autorización de
+GitHub. Se comprobó el trigger `21fde65a-d762-4fc4-a5fa-4c4c90104b91`, conectado
+a `main` y al repositorio correcto. Se activó Wait for CI y se verificó
+`checkSuites: true` mediante la API de Railway.
+
+Si el mismo problema vuelve a ocurrir, revisar con la cuenta autorizada:
 
 1. Conectar GitHub en los ajustes de la cuenta de Railway.
 2. Revisar en GitHub la instalación de Railway y su acceso a este repo. No
@@ -93,8 +98,9 @@ Pasos para resolverlo con la cuenta autorizada:
 5. Hacer un merge aprobado y comprobar un despliegue nuevo asociado a ese SHA,
    posterior a los checks de GitHub. Registrar el enlace/ID del despliegue.
 
-Mientras esto no se verifique, el auto-deploy y Wait for CI siguen pendientes;
-el primer despliegue exitoso no prueba que funcionen automáticamente.
+La configuración automática ya está activa. Falta comprobar un despliegue
+automático posterior a un merge aprobado; el primer despliegue manual exitoso
+no es evidencia de esa ejecución.
 
 [Requisitos oficiales de auto-deploy y Wait for CI](https://docs.railway.com/deployments/github-autodeploys).
 
@@ -162,7 +168,7 @@ desde `release/etapa2-produccion` hacia `main`:
 - No se creó ningún tag manual ni se publicó el backend en npm.
 
 Un tag o Release no equivale a un deploy ni hace el merge del PR. GIA-70 se
-completó; GIA-56/GIA-68 conservan los pendientes de integración con Railway.
+completó; GIA-56/GIA-68 conservan la comprobación del auto-deploy por merge.
 
 ## Evidencia y pendientes de demo — GIA-68
 
@@ -177,7 +183,7 @@ completó; GIA-56/GIA-68 conservan los pendientes de integración con Railway.
 | Frontend de la demo | Copia local actualizada a `origin/main` (`faf49a5`), sin cambios de código; contiene el panel de administrador completo |
 | Mapas desde Railway | Script real `probar-mapas.js`: Santa Fe → Paraná, 29,62 km; consulta privada a PostgreSQL y proveedor real |
 | Redeploy para aplicar variables | `f840a1bc-91f4-4511-bfa6-ad8510c95b34`, SUCCESS; `/health` nuevamente 200 |
-| Auto-deploy y Wait for CI | Pendientes del acceso GitHub reconocido por Railway |
+| Auto-deploy y Wait for CI | Trigger de main activo, checkSuites true; pendiente comprobar el despliegue automático por merge |
 | Tag y Release reales | v1.0.0 publicada automáticamente; SHA del tag verificado |
 | Flujo completo de demo | Login confirmado; falta ensayar las operaciones con datos de demostración acordados |
 
