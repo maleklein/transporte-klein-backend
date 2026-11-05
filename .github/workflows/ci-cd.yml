@@ -80,3 +80,16 @@ jobs:
           # En los PRs espera el Quality Gate: si no pasa, el job falla y el PR queda bloqueado.
           args: >
             -Dsonar.qualitygate.wait=${{ github.event_name == 'pull_request' }}
+
+  # GIA-70: versión y Release de las ramas release/, solo si sonar-validation pasó
+  # (tests y Quality Gate). El job vive en release-version.yml; acá solo se llama.
+  create-release-version:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.base_ref == 'main' &&
+      startsWith(github.head_ref, 'release/') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: sonar-validation
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-version.yml
