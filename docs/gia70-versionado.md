@@ -29,14 +29,15 @@ abrir el PR, y usar Create a merge commit para conservar el historial.
 - `.github/workflows/release-version.yml`: workflow reutilizable con
   `create-release-version`. Usa la accion v4 pedida en la tarea y fija
   semantic-release 21.1.1, la version por defecto documentada de esa accion.
-- El workflow principal de GIA-61 debe llamarlo despues de `sonar-validation`.
+- `.github/workflows/ci-cd.yml` de GIA-61 ya lo llama despues de
+  `sonar-validation`, integrado mediante PR #37.
 
-Mientras no exista ese llamado, no se publica ninguna version automaticamente.
-No se agregan disparadores paralelos que permitan publicar sin pasar Sonar.
+El llamado esta integrado. No hay disparadores paralelos que permitan publicar
+sin pasar Sonar. La prueba real de publicacion se registra en la guia de deploy.
 
 ### Integracion en `.github/workflows/ci-cd.yml`
 
-Cuando este integrado GIA-61, agregar este job debajo de `jobs`, al mismo nivel
+El workflow principal contiene este job debajo de `jobs`, al mismo nivel
 que `sonar-validation` (no dentro de sus steps):
 
 ```yaml
@@ -103,7 +104,7 @@ Estas pruebas no verifican los permisos reales del token, el Quality Gate de
 Sonar, la publicacion de GitHub ni el deploy; esas comprobaciones siguen
 pendientes en el entorno real.
 
-## Prueba final en GitHub (pendiente de GIA-61)
+## Prueba final en GitHub
 
 La comprobacion real crea un tag y una Release; no es una simulacion.
 
