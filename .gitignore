@@ -3,3 +3,6 @@ node_modules/
 .vscode/
 # Local Pi runtime state
 .atl/
+
+# Reporte de cobertura que genera el workflow (lo lee SonarQube)
+lcov.info
