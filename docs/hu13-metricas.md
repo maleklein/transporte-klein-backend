@@ -2,7 +2,7 @@
 
 `GET /metricas` (sólo administrador) devuelve los indicadores del panel para
 un período. Esta sección documenta las definiciones con las que se calcula
-cada número, para que el código y el README no diverjan.
+cada número, para que el código y este documento no diverjan.
 
 ## Parámetros
 

@@ -4,8 +4,8 @@
  * Función pura a propósito: no conoce la base ni Express. Recibe los
  * kilómetros y los parámetros y devuelve la cuenta, así el criterio de
  * reproducibilidad se puede probar con datos fijos (`tests/costos.test.js`)
- * sin levantar nada. La fórmula está escrita también en el README, que es
- * contra lo que se verifica.
+ * sin levantar nada. La fórmula está escrita también en `docs/hu10-costos.md`,
+ * que es contra lo que se verifica.
  */
 
 /** Claves de PARAMETRO_OPERATIVO que usa la fórmula, en el orden en que se muestran. */

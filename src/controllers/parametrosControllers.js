@@ -4,7 +4,7 @@
  * El administrador consulta y cambia los valores de la fórmula de costos sin
  * tocar el código. Cambiarlos NO recalcula las cargas que ya tienen su
  * estimación: cada carga guarda la cuenta como foto del momento en que se
- * calculó (ver el README). Los valores nuevos se usan desde la próxima vez que
+ * calculó (ver `docs/hu10-costos.md`). Los valores nuevos se usan desde la próxima vez que
  * se calculen kilómetros.
  */
 
