@@ -1,0 +1,51 @@
+name: Versionado del backend
+
+# GIA-61 debe llamar este workflow DESPUES de sonar-validation.
+# No tiene disparadores push/pull_request propios para no saltear Sonar.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  create-release-version:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.base_ref == 'main' &&
+      startsWith(github.head_ref, 'release/') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Serializa la publicacion para evitar que dos PR intenten crear el mismo tag.
+    concurrency:
+      group: release-version-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Descargar la rama y su historial completo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
+
+      - name: Comprobar que se publica el commit evaluado
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Configurar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Crear version y release
+        id: create_release
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 21.1.1
+          ci: false
+          # Usa la rama del checkout en vez de refs/pull/.../merge.
+          unset_gha_env: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
