@@ -36,12 +36,22 @@ async function emitirCalificacion(datos, usuario, db = pool) {
         throw new ErrorCalificacion(400, `El comentario debe ser texto de hasta ${MAX_COMENTARIO} caracteres.`);
     }
     const comentario = datos.comentario?.trim() || null;
+    // Los camioneros no califican: solo el administrador califica, y
+    // siempre al camionero asignado, nunca a otro administrador.
+    if (usuario.rol === 'camionero') {
+        throw new ErrorCalificacion(403, 'Los camioneros no pueden calificar viajes. Solo el administrador que creó la carga puede calificar al camionero asignado.');
+    }
     const cliente = await db.connect();
     try {
         await cliente.query('BEGIN');
         const carga = await leerCarga(cliente, idCarga, true);
         const receptor = contraparte(carga, usuario);
-        if (!receptor) throw new ErrorCalificacion(403, 'Solo el administrador creador y el camionero asignado pueden calificar este viaje.');
+        if (!receptor) throw new ErrorCalificacion(403, 'Solo el administrador que creó esta carga puede calificar al camionero asignado.');
+        // Guarda explícita, además de la que ya impone el esquema (la FK de
+        // id_camionero_asignado sólo admite camioneros): la calificación
+        // nunca puede terminar apuntando a un administrador.
+        const { rows: filasReceptor } = await cliente.query('SELECT rol FROM USUARIO WHERE id_usuario = $1', [receptor]);
+        if (filasReceptor[0]?.rol !== 'camionero') throw new ErrorCalificacion(403, 'No se puede calificar a un administrador.');
         if (carga.estado_actual !== 'entregada') throw new ErrorCalificacion(409, 'La carga debe estar entregada para calificar.');
         const { rows } = await cliente.query(`INSERT INTO CALIFICACION (id_emisor, id_receptor, id_carga, puntaje, comentario)
             VALUES ($1, $2, $3, $4, $5) RETURNING *`, [usuario.id, receptor, idCarga, datos.puntaje, comentario]);
@@ -76,6 +86,12 @@ async function consultarPerfil(id, pagina, usuario, db = pool) {
     }
     const perfil = await db.query('SELECT id_usuario, nombre, apellido, rol FROM USUARIO WHERE id_usuario = $1', [idUsuario]);
     if (!perfil.rows.length) throw new ErrorCalificacion(404, 'No encontramos el usuario.');
+    // Un administrador no recibe calificaciones: nunca es la contraparte
+    // calificada, así que ni la reputación ni el historial las muestran.
+    if (perfil.rows[0].rol === 'administrador') {
+        return { usuario: perfil.rows[0], reputacion: { ...calcularReputacion([]), total: 0 },
+            historial: [], pagina: numeroPagina, por_pagina: 20, hay_mas: false };
+    }
     // Una sola lectura para que promedio, total e historial correspondan al mismo estado.
     const { rows } = await db.query(`WITH evaluaciones AS (
         SELECT c.*, u.nombre AS nombre_emisor, u.apellido AS apellido_emisor,

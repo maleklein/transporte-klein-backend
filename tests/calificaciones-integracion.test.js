@@ -74,16 +74,15 @@ test('HU11: API y PostgreSQL reales, permisos, entrega y reputación', {
             assert.equal((await calificar(1, { id_carga: 4 })).estado, 403);
             assert.equal((await pedir('/cargas/2/calificacion', 2)).cuerpo.puede_calificar, false);
         });
-        await t.test('ambas partes califican una sola vez, con destinatario correcto', async () => {
+        await t.test('solo el administrador califica al camionero asignado, una sola vez', async () => {
             const primero = await calificar(1, { comentario: '  Buen viaje  ' });
             assert.equal(primero.estado, 201);
             assert.equal(primero.cuerpo.id_receptor, 2);
             assert.equal(primero.cuerpo.comentario, 'Buen viaje');
-            const segundo = await calificar(2, { puntaje: 4, comentario: '  ' });
-            assert.equal(segundo.estado, 201);
-            assert.equal(segundo.cuerpo.id_receptor, 1);
-            assert.equal(segundo.cuerpo.comentario, null);
             assert.equal((await calificar(1)).estado, 409);
+            const intentoCamionero = await calificar(2, { puntaje: 4 });
+            assert.equal(intentoCamionero.estado, 403);
+            assert.match(intentoCamionero.cuerpo.message, /camioner/i);
             const viaje = await pedir('/cargas/1/calificacion', 1);
             assert.equal(viaje.cuerpo.emitida.puntaje, 5);
             assert.equal(viaje.cuerpo.puede_calificar, false);
@@ -108,11 +107,13 @@ test('HU11: API y PostgreSQL reales, permisos, entrega y reputación', {
         await t.test('circuito postular, asignar, entregar y calificar en endpoints reales', async () => {
             assert.equal((await pedir('/cargas/4/postulaciones', 2, 'POST', {})).estado, 201);
             assert.equal((await pedir('/cargas/4/asignar', 1, 'POST', { id_camionero: 2 })).estado, 200);
-            assert.equal((await calificar(2, { id_carga: 4 })).estado, 409);
+            assert.equal((await calificar(1, { id_carga: 4 })).estado, 409);
+            assert.equal((await calificar(2, { id_carga: 4 })).estado, 403);
             for (const estado of ['en_viaje', 'entregada']) assert.equal((await pedir('/cargas/4/estado', 1, 'PATCH', { estado })).estado, 200);
             assert.equal((await pedir('/cargas/4', 2)).estado, 200);
-            assert.equal((await calificar(2, { id_carga: 4, puntaje: 3 })).estado, 201);
-            assert.equal((await pedir('/usuarios/1/reputacion', 2)).cuerpo.reputacion.promedio, 3.47);
+            assert.equal((await calificar(1, { id_carga: 4, puntaje: 3 })).estado, 201);
+            assert.equal((await pedir('/usuarios/2/reputacion', 1)).cuerpo.reputacion.promedio, 4.26);
+            assert.equal((await pedir('/usuarios/1/reputacion', 2)).cuerpo.reputacion.promedio, null);
         });
         await t.test('historial conserva más de diez, pagina y descarta antiguas del promedio', async () => {
             for (let i = 10; i < 32; i++) {
