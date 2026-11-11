@@ -25,10 +25,16 @@ const { ESTADOS, ESTADOS_ABIERTOS } = require('../domain/estadosCarga');
  * transacción, con la carga bloqueada (`FOR UPDATE`): si dos camioneros se
  * postulan a la vez a una disponible, el segundo espera y ya la ve pendiente.
  *
+ * También se rechaza si la carga pesa más que la capacidad declarada del
+ * camionero (igual peso que capacidad sí es válido). Si el camionero no
+ * cargó su capacidad en el perfil, se rechaza también: sin ese dato no hay
+ * forma de saber si puede llevarla.
+ *
  * Respuestas: 201 con la postulación · 400 si `id` no es numérico ·
  * 403 si el usuario no tiene perfil de camionero · 404 si la carga no existe ·
- * 409 si la carga ya no recibe postulaciones o si ya se había postulado ·
- * 500 ante un error inesperado.
+ * 409 si la carga ya no recibe postulaciones, si ya se había postulado, si
+ * la carga supera la capacidad del camionero o si el camionero no tiene
+ * capacidad cargada en su perfil · 500 ante un error inesperado.
  *
  * @param {import('express').Request} req - Params: id (id de la carga). req.usuario lo provee verifyToken.
  * @param {import('express').Response} res
@@ -50,7 +56,7 @@ const crearPostulacion = async (req, res) => {
 
         // 2. Validar que la carga exista y siga recibiendo postulaciones
         const cargaResult = await client.query(
-            'SELECT estado_actual FROM CARGA WHERE id_carga = $1 FOR UPDATE',
+            'SELECT estado_actual, peso_kg FROM CARGA WHERE id_carga = $1 FOR UPDATE',
             [idCarga]
         );
 
@@ -59,10 +65,36 @@ const crearPostulacion = async (req, res) => {
             return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
         }
 
-        const estadoActual = cargaResult.rows[0].estado_actual;
+        const { estado_actual: estadoActual, peso_kg: pesoCarga } = cargaResult.rows[0];
         if (!ESTADOS_ABIERTOS.includes(estadoActual)) {
             await client.query('ROLLBACK');
             return res.status(409).json({ message: 'La carga ya no se encuentra disponible para postulaciones' });
+        }
+
+        // 2.b. Validar que el camionero pueda cargar el peso de la carga.
+        // Si no tiene fila en CAMIONERO, el INSERT de abajo lo va a rechazar
+        // con 23503 (403, "sin perfil de camionero"); acá sólo nos importa
+        // el caso en que sí tiene perfil pero no cargó la capacidad: sin ese
+        // dato no hay forma de saber si puede llevar la carga, así que se
+        // rechaza igual que si no alcanzara.
+        const camioneroResult = await client.query(
+            'SELECT capacidad_kg FROM CAMIONERO WHERE id_usuario = $1',
+            [idCamionero]
+        );
+        const capacidadCamionero = camioneroResult.rows[0]?.capacidad_kg ?? null;
+
+        if (camioneroResult.rows.length > 0 && capacidadCamionero === null) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                message: 'No podés postularte sin cargar la capacidad de tu vehículo en tu perfil.',
+            });
+        }
+
+        if (capacidadCamionero !== null && Number(pesoCarga) > Number(capacidadCamionero)) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                message: `La carga pesa ${pesoCarga} kg y tu capacidad es ${capacidadCamionero} kg.`,
+            });
         }
 
         // 3. Insertar la postulación en la base de datos
