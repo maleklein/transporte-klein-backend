@@ -1,5 +1,6 @@
 const pool = require('../db');
 const bcrypt = require('bcrypt');
+const isEmail = require('validator/lib/isEmail');
 
 // Campos obligatorios para cualquier usuario, sin importar su rol.
 const CAMPOS_OBLIGATORIOS = ['nombre', 'apellido', 'dni', 'email', 'contraseña', 'rol'];
@@ -55,9 +56,6 @@ const validarNombreApellido = (valor, etiqueta) => {
 // HU 1.1: el DNI son 7 u 8 dígitos exactos, sin puntos ni espacios.
 const PATRON_DNI = /^\d{7,8}$/;
 
-// HU 1.1: nombre@dominio.ext, sin espacios ni una segunda arroba, con una
-// extensión de al menos dos letras.
-const PATRON_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const LARGO_MAXIMO_EMAIL = 100;
 
 // HU 1.1: bcrypt trunca en silencio lo que pasa de 72 bytes, así que una
@@ -108,11 +106,17 @@ const validarDni = (valor) => {
 };
 
 /**
- * Valida y recorta el email (HU 1.1): formato nombre@dominio.ext (sin
- * espacios ni doble arroba, con una extensión de al menos dos letras) y
- * hasta 100 caracteres. Se guarda tal como se ingresó, sólo recortado: la
- * comparación sin distinguir mayúsculas para el duplicado la hace la
- * consulta a la base (con LOWER()), no esta función.
+ * Valida y recorta el email (HU 1.1): hasta 100 caracteres y con formato de
+ * email real. El formato no se arma a mano: lo valida `isEmail` de
+ * validator.js, la librería que usa casi todo el ecosistema de Node (sobre
+ * ella está hecho express-validator). Exige un dominio de verdad, con
+ * terminación (`gmail.com`, `uap.edu.ar`), y rechaza cosas como `!@!.com` o
+ * `x@y..com`, que la expresión anterior dejaba pasar. El frontend usa la
+ * misma versión de la librería, así los dos aceptan exactamente lo mismo.
+ *
+ * Se guarda tal como se ingresó, sólo recortado: la comparación sin
+ * distinguir mayúsculas para el duplicado la hace la consulta a la base
+ * (con LOWER()), no esta función.
  *
  * @param {*} valor - lo que llegó en el body.
  * @returns {{ error: string } | { valor: string }} el error, o el valor ya recortado.
@@ -123,7 +127,7 @@ const validarEmail = (valor) => {
     if (texto.length > LARGO_MAXIMO_EMAIL) {
         return { error: `El email no puede superar los ${LARGO_MAXIMO_EMAIL} caracteres.` };
     }
-    if (!PATRON_EMAIL.test(texto)) {
+    if (!isEmail(texto)) {
         return { error: 'El email no tiene un formato válido.' };
     }
 
