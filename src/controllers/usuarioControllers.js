@@ -158,6 +158,91 @@ const validarLargoCamionero = (valor, campo, largoMaximo) => {
 };
 
 /**
+ * Comprueba que estén todos los campos pedidos y que ninguno venga vacío.
+ *
+ * @param {object} body - el `req.body` del pedido.
+ * @param {string[]} campos - nombres de los campos obligatorios.
+ * @param {string} [sufijo] - se agrega al mensaje (" para el rol camionero").
+ * @returns {string|null} el mensaje del primer campo que falta, o null si están todos.
+ */
+const buscarCampoFaltante = (body, campos, sufijo = '') => {
+    for (const campo of campos) {
+        const valor = body[campo];
+        if (valor === undefined || valor === null || String(valor).trim() === '') {
+            return `El campo '${campo}' es obligatorio${sufijo}`;
+        }
+    }
+    return null;
+};
+
+/**
+ * Valida nombre, apellido, DNI y email, que el alta y la edición piden igual.
+ * Devuelve el error del primero que falle, en ese orden.
+ *
+ * @param {object} body - el `req.body` del pedido.
+ * @returns {{ error: string } | { valores: { nombre: string, apellido: string, dni: string, email: string } }}
+ */
+const validarDatosDeIdentidad = (body) => {
+    const validados = {
+        nombre: validarNombreApellido(body.nombre, 'nombre'),
+        apellido: validarNombreApellido(body.apellido, 'apellido'),
+        dni: validarDni(body.dni),
+        email: validarEmail(body.email),
+    };
+
+    for (const resultado of Object.values(validados)) {
+        if (resultado.error) return { error: resultado.error };
+    }
+
+    return {
+        valores: {
+            nombre: validados.nombre.valor,
+            apellido: validados.apellido.valor,
+            dni: validados.dni.valor,
+            email: validados.email.valor,
+        },
+    };
+};
+
+/**
+ * Valida los datos que sólo tiene un camionero. La capacidad se valida acá
+ * pero no se recorta ni se convierte: va a la base tal como llegó.
+ *
+ * @param {object} body - el `req.body` del pedido.
+ * @returns {{ error: string } | { valores: { ubicacion: string, tipo_vehiculo: string } }}
+ */
+const validarDatosDeCamionero = (body) => {
+    const falta = buscarCampoFaltante(body, CAMPOS_CAMIONERO, ' para el rol camionero');
+    if (falta) return { error: falta };
+
+    const ubicacionValidada = validarLargoCamionero(body.ubicacion, 'ubicacion', LARGO_MAXIMO_UBICACION);
+    if (ubicacionValidada.error) return { error: ubicacionValidada.error };
+
+    const tipoVehiculoValidado = validarLargoCamionero(body.tipo_vehiculo, 'tipo_vehiculo', LARGO_MAXIMO_TIPO_VEHICULO);
+    if (tipoVehiculoValidado.error) return { error: tipoVehiculoValidado.error };
+
+    if (isNaN(Number(body.capacidad_kg))) {
+        return { error: `El campo 'capacidad_kg' debe ser numérico` };
+    }
+    if (Number(body.capacidad_kg) <= 0) {
+        return { error: 'La capacidad debe ser un número mayor a cero.' };
+    }
+
+    return { valores: { ubicacion: ubicacionValidada.valor, tipo_vehiculo: tipoVehiculoValidado.valor } };
+};
+
+/**
+ * Traduce el error de clave única de PostgreSQL (23505) al campo que lo causó.
+ * Es la red de seguridad ante dos pedidos simultáneos: la comprobación previa
+ * ya cubre el caso normal.
+ *
+ * @param {Error & { constraint?: string }} error - el error que tiró pg.
+ * @returns {string} el mensaje para el usuario.
+ */
+const mensajeDeDuplicado = (error) =>
+    `El ${error.constraint === 'usuario_dni_key' ? 'DNI' : 'email'} ya está registrado`;
+
+/**
  * Controlador de POST /usuarios: da de alta un usuario (administrador o camionero).
  * Si el rol es 'camionero', crea además el registro asociado en CAMIONERO.
  *
@@ -168,37 +253,20 @@ const validarLargoCamionero = (valor, campo, largoMaximo) => {
 const crearUsuario = async (req, res) => {
     const { capacidad_kg } = req.body;
 
-    for (const campo of CAMPOS_OBLIGATORIOS) {
-        const valor = req.body[campo];
-        if (valor === undefined || valor === null || String(valor).trim() === '') {
-            return res.status(400).json({ message: `El campo '${campo}' es obligatorio` });
-        }
+    const falta = buscarCampoFaltante(req.body, CAMPOS_OBLIGATORIOS);
+    if (falta) {
+        return res.status(400).json({ message: falta });
     }
 
-    const nombreValidado = validarNombreApellido(req.body.nombre, 'nombre');
-    if (nombreValidado.error) {
-        return res.status(400).json({ message: nombreValidado.error });
-    }
-    const apellidoValidado = validarNombreApellido(req.body.apellido, 'apellido');
-    if (apellidoValidado.error) {
-        return res.status(400).json({ message: apellidoValidado.error });
-    }
-    const dniValidado = validarDni(req.body.dni);
-    if (dniValidado.error) {
-        return res.status(400).json({ message: dniValidado.error });
-    }
-    const emailValidado = validarEmail(req.body.email);
-    if (emailValidado.error) {
-        return res.status(400).json({ message: emailValidado.error });
+    const identidad = validarDatosDeIdentidad(req.body);
+    if (identidad.error) {
+        return res.status(400).json({ message: identidad.error });
     }
     const contraseñaValidada = validarContraseña(req.body.contraseña);
     if (contraseñaValidada.error) {
         return res.status(400).json({ message: contraseñaValidada.error });
     }
-    const nombre = nombreValidado.valor;
-    const apellido = apellidoValidado.valor;
-    const dni = dniValidado.valor;
-    const email = emailValidado.valor;
+    const { nombre, apellido, dni, email } = identidad.valores;
     const contraseña = contraseñaValidada.valor;
 
     // Se normaliza para que "Administrador " o "CAMIONERO" también sean válidos.
@@ -210,30 +278,11 @@ const crearUsuario = async (req, res) => {
     let ubicacion = null;
     let tipo_vehiculo = null;
     if (rol === 'camionero') {
-        for (const campo of CAMPOS_CAMIONERO) {
-            const valor = req.body[campo];
-            if (valor === undefined || valor === null || String(valor).trim() === '') {
-                return res.status(400).json({ message: `El campo '${campo}' es obligatorio para el rol camionero` });
-            }
+        const camionero = validarDatosDeCamionero(req.body);
+        if (camionero.error) {
+            return res.status(400).json({ message: camionero.error });
         }
-
-        const ubicacionValidada = validarLargoCamionero(req.body.ubicacion, 'ubicacion', LARGO_MAXIMO_UBICACION);
-        if (ubicacionValidada.error) {
-            return res.status(400).json({ message: ubicacionValidada.error });
-        }
-        const tipoVehiculoValidado = validarLargoCamionero(req.body.tipo_vehiculo, 'tipo_vehiculo', LARGO_MAXIMO_TIPO_VEHICULO);
-        if (tipoVehiculoValidado.error) {
-            return res.status(400).json({ message: tipoVehiculoValidado.error });
-        }
-        ubicacion = ubicacionValidada.valor;
-        tipo_vehiculo = tipoVehiculoValidado.valor;
-
-        if (isNaN(Number(capacidad_kg))) {
-            return res.status(400).json({ message: `El campo 'capacidad_kg' debe ser numérico` });
-        }
-        if (Number(capacidad_kg) <= 0) {
-            return res.status(400).json({ message: 'La capacidad debe ser un número mayor a cero.' });
-        }
+        ({ ubicacion, tipo_vehiculo } = camionero.valores);
     }
 
     try {
@@ -294,8 +343,7 @@ const crearUsuario = async (req, res) => {
         // Safety net: cubre el caso en que dos requests pasan la validación de duplicados
         // casi al mismo tiempo y ambos llegan al INSERT, que la constraint UNIQUE frena.
         if (error.code === '23505') {
-            const campo = error.constraint === 'usuario_dni_key' ? 'DNI' : 'email';
-            return res.status(400).json({ message: `El ${campo} ya está registrado` });
+            return res.status(400).json({ message: mensajeDeDuplicado(error) });
         }
         console.error(error);
         return res.status(500).json({ message: 'Error interno del servidor' });
@@ -320,42 +368,25 @@ const actualizarUsuario = async (req, res) => {
         return res.status(400).json({ message: "El parámetro 'id' debe ser numérico" });
     }
 
-    // Rechaza el pedido si intentan tocar un campo protegido (el DNI, entre otros)
+    // Rechaza el pedido si intentan tocar un campo protegido (el rol o la contraseña)
     for (const campo of CAMPOS_BLOQUEADOS) {
         if (req.body[campo] !== undefined) {
             return res.status(400).json({ message: `El campo '${campo}' no se puede modificar desde este endpoint` });
         }
     }
 
-    for (const campo of CAMPOS_EDITABLES) {
-        const valor = req.body[campo];
-        if (valor === undefined || valor === null || String(valor).trim() === '') {
-            return res.status(400).json({ message: `El campo '${campo}' es obligatorio` });
-        }
+    const falta = buscarCampoFaltante(req.body, CAMPOS_EDITABLES);
+    if (falta) {
+        return res.status(400).json({ message: falta });
     }
 
-    const nombreValidado = validarNombreApellido(req.body.nombre, 'nombre');
-    if (nombreValidado.error) {
-        return res.status(400).json({ message: nombreValidado.error });
-    }
-    const apellidoValidado = validarNombreApellido(req.body.apellido, 'apellido');
-    if (apellidoValidado.error) {
-        return res.status(400).json({ message: apellidoValidado.error });
-    }
-    const dniValidado = validarDni(req.body.dni);
-    if (dniValidado.error) {
-        return res.status(400).json({ message: dniValidado.error });
-    }
-    const emailValidado = validarEmail(req.body.email);
-    if (emailValidado.error) {
-        return res.status(400).json({ message: emailValidado.error });
+    const identidad = validarDatosDeIdentidad(req.body);
+    if (identidad.error) {
+        return res.status(400).json({ message: identidad.error });
     }
 
     const { capacidad_kg } = req.body;
-    const nombre = nombreValidado.valor;
-    const apellido = apellidoValidado.valor;
-    const dni = dniValidado.valor;
-    const email = emailValidado.valor;
+    const { nombre, apellido, dni, email } = identidad.valores;
     const estado = String(req.body.estado).trim().toLowerCase();
     if (!ESTADOS_VALIDOS.includes(estado)) {
         return res.status(400).json({ message: `El campo 'estado' debe ser 'activo' o 'inactivo'` });
@@ -381,30 +412,11 @@ const actualizarUsuario = async (req, res) => {
         let ubicacion = null;
         let tipo_vehiculo = null;
         if (rol === 'camionero') {
-            for (const campo of CAMPOS_CAMIONERO) {
-                const valor = req.body[campo];
-                if (valor === undefined || valor === null || String(valor).trim() === '') {
-                    return res.status(400).json({ message: `El campo '${campo}' es obligatorio para el rol camionero` });
-                }
+            const camionero = validarDatosDeCamionero(req.body);
+            if (camionero.error) {
+                return res.status(400).json({ message: camionero.error });
             }
-
-            const ubicacionValidada = validarLargoCamionero(req.body.ubicacion, 'ubicacion', LARGO_MAXIMO_UBICACION);
-            if (ubicacionValidada.error) {
-                return res.status(400).json({ message: ubicacionValidada.error });
-            }
-            const tipoVehiculoValidado = validarLargoCamionero(req.body.tipo_vehiculo, 'tipo_vehiculo', LARGO_MAXIMO_TIPO_VEHICULO);
-            if (tipoVehiculoValidado.error) {
-                return res.status(400).json({ message: tipoVehiculoValidado.error });
-            }
-            ubicacion = ubicacionValidada.valor;
-            tipo_vehiculo = tipoVehiculoValidado.valor;
-
-            if (isNaN(Number(capacidad_kg))) {
-                return res.status(400).json({ message: `El campo 'capacidad_kg' debe ser numérico` });
-            }
-            if (Number(capacidad_kg) <= 0) {
-                return res.status(400).json({ message: 'La capacidad debe ser un número mayor a cero.' });
-            }
+            ({ ubicacion, tipo_vehiculo } = camionero.valores);
         }
 
         // Se valida el email duplicado excluyendo al propio usuario que se está editando,
@@ -465,10 +477,7 @@ const actualizarUsuario = async (req, res) => {
         }
     } catch (error) {
         if (error.code === '23505') {
-            // Las comprobaciones de arriba ya cubren el caso normal; esto atrapa
-            // el choque con otra edición que haya entrado en el medio.
-            const campo = error.constraint === 'usuario_dni_key' ? 'DNI' : 'email';
-            return res.status(400).json({ message: `El ${campo} ya está registrado` });
+            return res.status(400).json({ message: mensajeDeDuplicado(error) });
         }
         console.error(error);
         return res.status(500).json({ message: 'Error interno del servidor' });
