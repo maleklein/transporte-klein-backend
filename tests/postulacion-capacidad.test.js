@@ -25,17 +25,20 @@ function pedido(idCarga, idCamionero) {
  * deja un registro de las consultas para poder revisar el flujo (ROLLBACK vs
  * COMMIT) sin depender de una base real.
  *
- * @param {{ estadoActual: string, pesoCarga: string, filaCamionero: object|null }} datos
+ * La fecha de retiro es lejana por defecto, para que sólo la pruebe el test
+ * que la cambia.
+ *
+ * @param {{ estadoActual: string, pesoCarga: string, filaCamionero: object|null, fecha?: string }} datos
  */
-function clienteSimulado({ estadoActual, pesoCarga, filaCamionero }) {
+function clienteSimulado({ estadoActual, pesoCarga, filaCamionero, fecha = '2099-12-01' }) {
     const consultas = [];
     return {
         consultas,
         async query(sql) {
             consultas.push(sql.replace(/\s+/g, ' ').trim());
             const texto = consultas[consultas.length - 1];
-            if (texto.startsWith('SELECT estado_actual, peso_kg FROM CARGA')) {
-                return { rows: [{ estado_actual: estadoActual, peso_kg: pesoCarga }] };
+            if (texto.startsWith('SELECT estado_actual, peso_kg')) {
+                return { rows: [{ estado_actual: estadoActual, peso_kg: pesoCarga, fecha }] };
             }
             if (texto.startsWith('SELECT capacidad_kg FROM CAMIONERO')) {
                 return { rows: filaCamionero ? [filaCamionero] : [] };
@@ -103,5 +106,19 @@ test('crearPostulacion valida la capacidad del camionero sin tocar la base real'
         assert.equal(res.cuerpo.message, 'No podés postularte porque tu vehículo no tiene la capacidad cargada. Pedile a un administrador que la cargue.');
         assert.ok(client.consultas.some((q) => q === 'ROLLBACK'));
         assert.ok(!client.consultas.some((q) => q.startsWith('INSERT INTO POSTULACION')));
+    });
+
+    await t.test('fecha de retiro anterior a hoy: 409 sin mirar la capacidad', async () => {
+        client = clienteSimulado({
+            estadoActual: 'disponible', pesoCarga: '500', filaCamionero: { capacidad_kg: '1000' }, fecha: '2000-01-01',
+        });
+
+        const res = respuesta();
+        await crearPostulacion(pedido(5, 2), res);
+
+        assert.equal(res.codigo, 409);
+        assert.equal(res.cuerpo.message, 'La fecha de retiro de esta carga ya pasó: no recibe más postulaciones.');
+        assert.ok(client.consultas.some((q) => q === 'ROLLBACK'));
+        assert.ok(!client.consultas.some((q) => q.startsWith('SELECT capacidad_kg')));
     });
 });

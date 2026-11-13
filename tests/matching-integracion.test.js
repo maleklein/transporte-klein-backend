@@ -76,7 +76,7 @@ test('circuito integrado: login → carga → postulaciones → mapas → rankin
         const bruno = await login('bruno@example.test');
         const alta = await pedir('/cargas', { token: admin, method: 'POST', body: {
             origen_id: '82063170', destino_id: '30084160', tipo_carga: 'Granos',
-            peso: 1000, fecha: '2026-11-10', observaciones: 'Prueba temporal HU5-HU9',
+            peso: 1000, fecha: '2099-11-10', observaciones: 'Prueba temporal HU5-HU9',
         } });
         assert.equal(alta.status, 201);
         const id = alta.body.id_carga;

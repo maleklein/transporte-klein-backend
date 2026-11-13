@@ -81,17 +81,17 @@ npm run test:cobertura   # lo mismo, con la cobertura de cada archivo de la app
 ```
 
 Sin base de datos corren los tests unitarios y los de HTTP con la base simulada,
-y se saltean los de integración (cuatro). Para correr también esos, hace falta
+y se saltean los de integración (cinco). Para correr también esos, hace falta
 el PostgreSQL del `.env` y estas variables:
 
 ```bash
-MATCHING_DB_TEST=1 CALIFICACIONES_DB_TEST=1 ADMINISTRACION_DB_TEST=1 npm test
+MATCHING_DB_TEST=1 CALIFICACIONES_DB_TEST=1 ADMINISTRACION_DB_TEST=1 CARGAS_DB_TEST=1 npm test
 ```
 
 En PowerShell:
 
 ```powershell
-$env:MATCHING_DB_TEST='1'; $env:CALIFICACIONES_DB_TEST='1'; $env:ADMINISTRACION_DB_TEST='1'; npm test
+$env:MATCHING_DB_TEST='1'; $env:CALIFICACIONES_DB_TEST='1'; $env:ADMINISTRACION_DB_TEST='1'; $env:CARGAS_DB_TEST='1'; npm test
 ```
 
 Ninguno toca los datos que ya hay en esa base: cada test de integración arma

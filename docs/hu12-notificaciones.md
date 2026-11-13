@@ -1,12 +1,19 @@
 # Notificaciones (HU 12)
 
-El sistema deja un aviso en la tabla `NOTIFICACION` ante tres eventos:
+El sistema deja un aviso en la tabla `NOTIFICACION` ante cuatro eventos:
 
 | Evento | Quién lo recibe |
 |---|---|
-| Alta de una carga | Los camioneros con disponibilidad y la cuenta activa |
+| Alta de una carga | Los camioneros con disponibilidad, la cuenta activa y capacidad para el peso de la carga (los que no tienen capacidad cargada no lo reciben: tampoco se pueden postular) |
 | Cambio de estado | El administrador que creó la carga y el camionero asignado, salvo quien hizo el cambio |
 | Asignación (HU 6) | El camionero elegido, el administrador que asignó y los postulados que quedaron afuera |
+| Cancelación (HU 2.4) | Los camioneros que se habían postulado (`carga_cancelada`: "Se canceló la carga … a la que te habías postulado.") |
+
+Al cancelar una carga, además, se borra el aviso de carga nueva a los camioneros
+que no se habían postulado: era una oferta que ya no existe, y no tiene sentido
+sumarles otro aviso por una carga que no les interesó. Lo hace
+`notificarCancelacion`, que se llama desde `notificarCambioEstado` cuando el
+estado nuevo es `cancelada`, así que cancela por cualquier endpoint.
 
 Los avisos los arma `src/services/notificaciones.js`, dentro de la misma
 transacción que el hecho que los origina. El de cambio de estado se dispara

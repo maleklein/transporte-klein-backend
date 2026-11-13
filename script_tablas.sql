@@ -101,6 +101,9 @@ CREATE TABLE CARGA (
     -- libre, así que no puede haber una carga con un destino inventado.
     id_localidad_origen CHAR(8) NOT NULL REFERENCES LOCALIDAD(id_localidad),
     id_localidad_destino CHAR(8) NOT NULL REFERENCES LOCALIDAD(id_localidad),
+    -- Calle y número, opcionales: a veces el lugar es un campo y no tiene.
+    direccion_origen VARCHAR(150),
+    direccion_destino VARCHAR(150),
     tipo_carga VARCHAR(100) NOT NULL,
     peso_kg NUMERIC NOT NULL,
     fecha DATE NOT NULL,

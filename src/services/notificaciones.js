@@ -26,6 +26,7 @@ const TIPOS_NOTIFICACION = Object.freeze({
     CARGA_ASIGNADA: 'carga_asignada',
     ASIGNACION_CONFIRMADA: 'asignacion_confirmada',
     POSTULACION_RECHAZADA: 'postulacion_rechazada',
+    CARGA_CANCELADA: 'carga_cancelada',
 });
 
 /**
@@ -114,10 +115,14 @@ const notificar = async (idUsuario, tipoEvento, contenido, idCarga, client) => {
 /**
  * Avisa a los camioneros que se publicó una carga que pueden tomar.
  *
- * Le llega a todo camionero con disponibilidad y con la cuenta activa. El
- * primer filtro es el que pide la HU 12; el segundo, el de su criterio de
- * aceptación ("los camioneros activos"): sin él, un camionero dado de baja
- * que había quedado como disponible seguiría recibiendo avisos.
+ * Le llega a todo camionero con disponibilidad, con la cuenta activa y cuyo
+ * vehículo puede llevar el peso de la carga. El primer filtro es el que pide
+ * la HU 12; el segundo, el de su criterio de aceptación ("los camioneros
+ * activos"): sin él, un camionero dado de baja que había quedado como
+ * disponible seguiría recibiendo avisos. El tercero es la misma regla de la
+ * postulación (HU 4): no tiene sentido avisarle de una carga a la que no se
+ * va a poder postular. Sin capacidad cargada tampoco se puede postular, así
+ * que tampoco le llega.
  *
  * Va en un único INSERT ... SELECT y no en un bucle con una consulta por
  * camionero: con 200 camioneros serían 200 idas a la base dentro del alta, y
@@ -136,8 +141,9 @@ const notificarCargaNueva = async (idCarga, client) => {
          SELECT ca.id_usuario, $1, $2, $3
          FROM CAMIONERO ca
          JOIN USUARIO u ON u.id_usuario = ca.id_usuario
-         WHERE ca.disponibilidad AND u.estado = 'activo'`,
-        [TIPOS_NOTIFICACION.CARGA_NUEVA, contenido, idCarga]
+         WHERE ca.disponibilidad AND u.estado = 'activo'
+           AND ca.capacidad_kg >= $4`,
+        [TIPOS_NOTIFICACION.CARGA_NUEVA, contenido, idCarga, carga.peso_kg]
     );
 
     return resultado.rowCount;
@@ -154,6 +160,9 @@ const notificarCargaNueva = async (idCarga, client) => {
  * si ya tiene uno. A quien hizo el cambio no se le avisa: lo acaba de hacer y
  * la pantalla ya se lo confirmó. Si lo hizo el sistema (`idActor` null), les
  * llega a los dos.
+ *
+ * Si el estado nuevo es "cancelada", además ordena los avisos de los
+ * camioneros (`notificarCancelacion`).
  *
  * El alta no cuenta como cambio de estado, porque no hay estado anterior: su
  * aviso es `notificarCargaNueva`, que además va a otros destinatarios.
@@ -190,7 +199,53 @@ const notificarCambioEstado = async (idCarga, estadoAnterior, estadoNuevo, idAct
         avisos.push(await notificar(idUsuario, TIPOS_NOTIFICACION.CAMBIO_ESTADO, contenido, idCarga, client));
     }
 
+    if (estadoNuevo === ESTADOS.CANCELADA) {
+        await notificarCancelacion(idCarga, carga, client);
+    }
+
     return avisos;
+};
+
+/**
+ * Ordena los avisos de los camioneros cuando se cancela una carga.
+ *
+ * - Al que no se había postulado se le borra el aviso de "carga nueva": era
+ *   una oferta que ya no existe, y avisarle además que se canceló sería
+ *   llenarle la bandeja por una carga que nunca le interesó.
+ * - Al que se había postulado sí se le avisa: estaba esperando una respuesta.
+ *
+ * El camionero asignado no entra acá: una carga aceptada no se cancela sin
+ * volverla antes a pendiente (HU 2.4), y si tuviera uno ya le llega el aviso
+ * de cambio de estado.
+ *
+ * @param {number} idCarga - la carga cancelada.
+ * @param {object} carga - fila de `leerCarga`.
+ * @param {import('pg').PoolClient} client - client de la transacción de la cancelación.
+ * @returns {Promise<void>}
+ */
+const notificarCancelacion = async (idCarga, carga, client) => {
+    await client.query(
+        `DELETE FROM NOTIFICACION n
+         WHERE n.id_carga = $1 AND n.tipo_evento = $2
+           AND NOT EXISTS (
+               SELECT 1 FROM POSTULACION p
+               WHERE p.id_carga = n.id_carga AND p.id_camionero = n.id_usuario
+           )`,
+        [idCarga, TIPOS_NOTIFICACION.CARGA_NUEVA]
+    );
+
+    // Puede haber muchos postulados: una sola consulta, como en notificarCargaNueva.
+    await client.query(
+        `INSERT INTO NOTIFICACION (id_usuario, tipo_evento, contenido, id_carga)
+         SELECT p.id_camionero, $2, $3, $1
+         FROM POSTULACION p
+         WHERE p.id_carga = $1`,
+        [
+            idCarga,
+            TIPOS_NOTIFICACION.CARGA_CANCELADA,
+            `Se canceló la carga ${ruta(carga)} a la que te habías postulado.`,
+        ]
+    );
 };
 
 /**
@@ -260,6 +315,7 @@ const notificarAsignacion = async (idCarga, idCamionero, idAdmin, idsRechazados,
 module.exports = {
     TIPOS_NOTIFICACION,
     notificar,
+    notificarCancelacion,
     notificarCargaNueva,
     notificarCambioEstado,
     notificarAsignacion,

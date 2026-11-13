@@ -36,7 +36,7 @@ test('HU4: la postulación respeta la capacidad del camionero, comparada como n�
         // 900 kg sí entra en una capacidad de 1000 kg.
         for (const [id, peso] of [[1, 1500], [2, 1000], [3, 900], [4, 500]]) {
             await db.query(`INSERT INTO CARGA (id_carga,id_localidad_origen,id_localidad_destino,tipo_carga,peso_kg,fecha,estado_actual,id_admin_creador)
-                VALUES ($1,'30000001','30000002','Prueba',$2,'2026-12-01','disponible',1)`, [id, peso]);
+                VALUES ($1,'30000001','30000002','Prueba',$2,'2099-12-01','disponible',1)`, [id, peso]);
         }
 
         process.env.JWT_SECRET = randomBytes(32).toString('hex');
