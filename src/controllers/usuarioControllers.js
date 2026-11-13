@@ -301,12 +301,14 @@ const crearUsuario = async (req, res) => {
 
 /**
  * Controlador de PUT /usuarios/:id: edita datos de un usuario existente.
- * No permite modificar dni, rol ni contraseña desde este endpoint.
+ * No permite modificar dni, rol ni contraseña desde este endpoint, ni que un
+ * administrador se dé de baja a sí mismo.
  * Si el usuario es camionero, actualiza también sus datos en CAMIONERO.
  *
  * @param {import('express').Request} req - Params: id. Body: { nombre, apellido, email, estado, ubicacion?, tipo_vehiculo?, capacidad_kg? }.
  * @param {import('express').Response} res
- * @returns {Promise<import('express').Response>} 200 con el usuario actualizado, 400 por validación o email duplicado, 404 si no existe, 500 ante error inesperado.
+ * @returns {Promise<import('express').Response>} 200 con el usuario actualizado, 400 por validación o email duplicado,
+ *   404 si no existe, 409 si intenta darse de baja a sí mismo, 500 ante error inesperado.
  */
 const actualizarUsuario = async (req, res) => {
     // req.params siempre llega como texto, por eso se convierte a número
@@ -349,6 +351,13 @@ const actualizarUsuario = async (req, res) => {
     const estado = String(req.body.estado).trim().toLowerCase();
     if (!ESTADOS_VALIDOS.includes(estado)) {
         return res.status(400).json({ message: `El campo 'estado' debe ser 'activo' o 'inactivo'` });
+    }
+
+    // Un administrador no puede darse de baja a sí mismo: `verifyToken` rechaza
+    // toda petición de una cuenta inactiva, así que quedaría sin poder volver a
+    // activarse ni crear otro administrador. Darlo de baja es tarea de otro.
+    if (idUsuario === req.usuario.id && estado === 'inactivo') {
+        return res.status(409).json({ message: 'No podés dar de baja tu propia cuenta.' });
     }
 
     try {

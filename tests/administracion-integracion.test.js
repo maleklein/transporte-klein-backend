@@ -151,6 +151,37 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
             assert.equal(admin.cuerpo.camionero, undefined);
         });
 
+        await t.test('un administrador no puede darse de baja a sí mismo', async () => {
+            const propia = { nombre: 'Ana María', apellido: 'Prueba', email: 'admin-1@example.test' };
+
+            const baja = await pedir('/usuarios/1', 1, 'PUT', { ...propia, estado: 'inactivo' });
+            assert.equal(baja.estado, 409);
+            assert.match(baja.cuerpo.message, /tu propia cuenta/);
+
+            // Sigue activa y pudiendo trabajar: el rechazo no dejó la cuenta a medias.
+            assert.equal((await pedir('/usuarios', 1)).estado, 200);
+            // Dar de baja a otro administrador sí se puede.
+            const otro = await pedir('/usuarios', 1, 'POST', { nombre: 'Fede', apellido: 'Paz', dni: '30111224',
+                email: 'fede@example.test', contraseña: 'OtraClaveDePrueba', rol: 'administrador' });
+            assert.equal(otro.estado, 201);
+            const bajaOtro = await pedir(`/usuarios/${otro.cuerpo.id_usuario}`, 1, 'PUT',
+                { nombre: 'Fede', apellido: 'Paz', email: 'fede@example.test', estado: 'inactivo' });
+            assert.equal(bajaOtro.estado, 200);
+            assert.equal(bajaOtro.cuerpo.estado, 'inactivo');
+        });
+
+        await t.test('una cuenta dada de baja no puede usar la API, y el 403 lo dice con un código', async () => {
+            // `idNuevo` quedó inactivo en la prueba anterior; su token sigue siendo válido.
+            const respuesta = await pedir('/cargas', idNuevo);
+            assert.equal(respuesta.estado, 403);
+            assert.equal(respuesta.cuerpo.codigo, 'cuenta_inactiva');
+
+            // El 403 por falta de permisos no trae ese código: el front no debe cerrar la sesión ahí.
+            const sinPermiso = await pedir('/usuarios', 2);
+            assert.equal(sinPermiso.estado, 403);
+            assert.equal(sinPermiso.cuerpo.codigo, undefined);
+        });
+
         await t.test('el inicio de sesión rechaza datos faltantes y credenciales incorrectas', async () => {
             assert.equal((await pedir('/auth/login', null, 'POST', { email: 'admin-1@example.test' })).estado, 400);
             assert.equal((await pedir('/auth/login', null, 'POST', { email: 'nadie@example.test', contraseña: 'x' })).estado, 401);

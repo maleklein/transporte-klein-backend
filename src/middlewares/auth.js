@@ -75,7 +75,10 @@ const verifyToken = async (req, res, next) => {
 
         const usuario = resultado.rows[0];
         if (usuario.estado !== 'activo') {
-            return res.status(403).json({ message: 'La cuenta no está activa.' });
+            // El `codigo` distingue este 403 del que devuelve requireRol por falta
+            // de permisos: el frontend cierra la sesión sólo en este caso, porque
+            // con la cuenta dada de baja no hay nada que la persona pueda hacer.
+            return res.status(403).json({ message: 'La cuenta no está activa.', codigo: 'cuenta_inactiva' });
         }
 
         // El rol sale de la base, no del token: si a alguien le cambian el rol,
