@@ -24,10 +24,11 @@ const {
 const ESTADO_INICIAL = ESTADOS.DISPONIBLE;
 
 /**
- * Estados desde los que ya no se puede editar una carga (HU 2.2): una vez que
- * está en viaje o fue entregada, sus datos pasan a ser el registro de lo que
- * efectivamente pasó, no un borrador que se pueda seguir corrigiendo. Una
- * carga cancelada tampoco se edita: no hay viaje que seguir planificando.
+ * Estados desde los que no se puede editar una carga (HU 2.2): una vez que
+ * está en viaje o fue entregada, sus datos son el registro de lo que
+ * efectivamente pasó, no un borrador que se pueda seguir corrigiendo. Para
+ * corregirlos hay que volver la carga al paso anterior. Una carga cancelada
+ * tampoco se edita: no hay viaje que seguir planificando, y de ahí no se vuelve.
  */
 const ESTADOS_BLOQUEADOS_EDICION = [ESTADOS.EN_VIAJE, ESTADOS.ENTREGADA, ESTADOS.CANCELADA];
 
@@ -477,11 +478,9 @@ const obtenerHistorialCarga = async (req, res) => {
  * parcial: hay que volver a mandar los seis campos, igual que en
  * `actualizarUsuario`.
  *
- * Bloquea la edición si la carga está 'en_viaje' o 'entregada', pero por
- * motivos distintos: en viaje es un bloqueo mientras dure ese estado, y si
- * hace falta corregir algo se la puede volver a 'aceptada' (HU 7); entregada
- * es definitivo, porque es un estado final del que ya no se vuelve (RN-01).
- * No toca `estado_actual`.
+ * Bloquea la edición si la carga está 'en_viaje' o 'entregada': en los dos
+ * casos el bloqueo dura mientras dure ese estado, y para corregir algo hay que
+ * volver atrás primero (HU 7). No toca `estado_actual`.
  *
  * Si cambió el origen o el destino, recalcula los kilómetros (HU 9) igual que
  * el alta: 'ok' con el valor nuevo, o 'pendiente' si el servicio de mapas no
@@ -535,7 +534,7 @@ const actualizarCarga = async (req, res) => {
             const motivo = estadoActual === ESTADOS.EN_VIAJE
                 ? "Mientras está en viaje no se pueden modificar sus datos. Si necesitás corregir algo, volvé a pasarla a 'aceptada' primero."
                 : estadoActual === ESTADOS.ENTREGADA
-                    ? 'La carga ya fue entregada: sus datos quedan como registro de lo que pasó.'
+                    ? 'La carga ya fue entregada: sus datos quedan como registro de lo que pasó. Si necesitás corregir algo, deshacé la entrega primero.'
                     : 'La carga está cancelada: no tiene sentido modificar los datos de un viaje que no va a salir.';
 
             return res.status(409).json({

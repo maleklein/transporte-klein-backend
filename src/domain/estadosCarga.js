@@ -72,15 +72,17 @@ const TRANSICIONES = Object.freeze({
     [ESTADOS.PENDIENTE]: [ESTADOS.ACEPTADA, ESTADOS.DISPONIBLE, ESTADOS.CANCELADA],
     [ESTADOS.ACEPTADA]: [ESTADOS.EN_VIAJE, ESTADOS.PENDIENTE],
     [ESTADOS.EN_VIAJE]: [ESTADOS.ENTREGADA, ESTADOS.ACEPTADA],
-    [ESTADOS.ENTREGADA]: [],
+    // Entregada se puede deshacer: marcarla de más es un error fácil de cometer
+    // y antes dejaba la carga sin ninguna acción posible.
+    [ESTADOS.ENTREGADA]: [ESTADOS.EN_VIAJE],
     [ESTADOS.CANCELADA]: [],
 });
 
 /**
- * Estados de los que ya no se vuelve. Las transiciones hacia ellos son las
- * únicas irreversibles, y por eso el frontend pide confirmación antes.
+ * Estados de los que ya no se vuelve. Cancelar es la única salida sin retorno:
+ * una entrega marcada por error se deshace volviendo la carga a 'en_viaje'.
  */
-const ESTADOS_FINALES = Object.freeze([ESTADOS.ENTREGADA, ESTADOS.CANCELADA]);
+const ESTADOS_FINALES = Object.freeze([ESTADOS.CANCELADA]);
 
 /**
  * Estados en los que una carga recibe postulaciones (HU 4): "disponible"
