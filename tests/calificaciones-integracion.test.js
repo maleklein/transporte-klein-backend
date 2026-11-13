@@ -103,6 +103,8 @@ test('HU11: API y PostgreSQL reales, permisos, entrega y reputación', {
             assert.deepEqual(Object.keys(perfil.cuerpo.usuario).sort(), ['apellido','id_usuario','nombre','rol']);
             const vacio = await pedir('/usuarios/4/reputacion', 4);
             assert.equal(vacio.cuerpo.reputacion.promedio, null);
+            assert.deepEqual(vacio.cuerpo.reputacion.distribucion, { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });
+            assert.deepEqual((await pedir('/usuarios/1/reputacion', 1)).cuerpo.reputacion.distribucion, { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });
         });
         await t.test('circuito postular, asignar, entregar y calificar en endpoints reales', async () => {
             assert.equal((await pedir('/cargas/4/postulaciones', 2, 'POST', {})).estado, 201);
@@ -123,13 +125,19 @@ test('HU11: API y PostgreSQL reales, permisos, entrega y reputación', {
                     VALUES (1,4,$1,$2,'2026-11-02T12:00:00Z')`, [i, i < 22 ? 1 : 5]);
             }
             const pagina1 = (await pedir('/usuarios/4/reputacion', 4)).cuerpo;
-            assert.deepEqual(pagina1.reputacion, { promedio: 5, evaluaciones_utilizadas: 10, total: 22 });
-            assert.equal(pagina1.historial.length, 20);
+            // La distribución cuenta las 22, no solo las 10 del promedio ni las 20 de la página.
+            assert.deepEqual(pagina1.reputacion, { promedio: 5, evaluaciones_utilizadas: 10, total: 22,
+                distribucion: { 1: 12, 2: 0, 3: 0, 4: 0, 5: 10 } });
+            // De a 5 por página: 22 son cuatro páginas llenas y una de 2.
+            assert.equal(pagina1.por_pagina, 5);
+            assert.equal(pagina1.historial.length, 5);
             assert.equal(pagina1.hay_mas, true);
             const pagina2 = (await pedir('/usuarios/4/reputacion?pagina=2', 4)).cuerpo;
-            assert.equal(pagina2.historial.length, 2);
-            assert.equal(pagina2.hay_mas, false);
-            assert.ok(pagina1.historial[19].id_calificacion > pagina2.historial[0].id_calificacion);
+            assert.equal(pagina2.historial.length, 5);
+            assert.ok(pagina1.historial[4].id_calificacion > pagina2.historial[0].id_calificacion);
+            const ultima = (await pedir('/usuarios/4/reputacion?pagina=5', 4)).cuerpo;
+            assert.equal(ultima.historial.length, 2);
+            assert.equal(ultima.hay_mas, false);
         });
         await t.test('restricciones SQL impiden duplicados, autopuntaje y puntajes fuera de rango', async () => {
             await assert.rejects(db.query('INSERT INTO CALIFICACION (id_emisor,id_receptor,id_carga,puntaje) VALUES (1,2,1,3)'), { code: '23505' });
