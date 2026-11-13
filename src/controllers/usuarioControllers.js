@@ -9,8 +9,11 @@ const CAMPOS_CAMIONERO = ['ubicacion', 'tipo_vehiculo', 'capacidad_kg'];
 const ROLES_VALIDOS = ['administrador', 'camionero'];
 
 // Usadas por actualizarUsuario (HU 1.2).
-const CAMPOS_EDITABLES = ['nombre', 'apellido', 'email', 'estado'];
-const CAMPOS_BLOQUEADOS = ['dni', 'rol', 'contraseña'];
+const CAMPOS_EDITABLES = ['nombre', 'apellido', 'dni', 'email', 'estado'];
+// El rol no se cambia desde acá: pasar de camionero a administrador implica
+// decidir qué pasa con su fila de CAMIONERO y con sus viajes. La contraseña
+// tampoco: eso es un restablecimiento, no una edición de la ficha.
+const CAMPOS_BLOQUEADOS = ['rol', 'contraseña'];
 const ESTADOS_VALIDOS = ['activo', 'inactivo'];
 
 // HU 1.1 y 1.2: mismas reglas para nombre y apellido, en el alta y la edición.
@@ -301,11 +304,11 @@ const crearUsuario = async (req, res) => {
 
 /**
  * Controlador de PUT /usuarios/:id: edita datos de un usuario existente.
- * No permite modificar dni, rol ni contraseña desde este endpoint, ni que un
+ * No permite modificar rol ni contraseña desde este endpoint, ni que un
  * administrador se dé de baja a sí mismo.
  * Si el usuario es camionero, actualiza también sus datos en CAMIONERO.
  *
- * @param {import('express').Request} req - Params: id. Body: { nombre, apellido, email, estado, ubicacion?, tipo_vehiculo?, capacidad_kg? }.
+ * @param {import('express').Request} req - Params: id. Body: { nombre, apellido, dni, email, estado, ubicacion?, tipo_vehiculo?, capacidad_kg? }.
  * @param {import('express').Response} res
  * @returns {Promise<import('express').Response>} 200 con el usuario actualizado, 400 por validación o email duplicado,
  *   404 si no existe, 409 si intenta darse de baja a sí mismo, 500 ante error inesperado.
@@ -339,6 +342,10 @@ const actualizarUsuario = async (req, res) => {
     if (apellidoValidado.error) {
         return res.status(400).json({ message: apellidoValidado.error });
     }
+    const dniValidado = validarDni(req.body.dni);
+    if (dniValidado.error) {
+        return res.status(400).json({ message: dniValidado.error });
+    }
     const emailValidado = validarEmail(req.body.email);
     if (emailValidado.error) {
         return res.status(400).json({ message: emailValidado.error });
@@ -347,6 +354,7 @@ const actualizarUsuario = async (req, res) => {
     const { capacidad_kg } = req.body;
     const nombre = nombreValidado.valor;
     const apellido = apellidoValidado.valor;
+    const dni = dniValidado.valor;
     const email = emailValidado.valor;
     const estado = String(req.body.estado).trim().toLowerCase();
     if (!ESTADOS_VALIDOS.includes(estado)) {
@@ -402,8 +410,16 @@ const actualizarUsuario = async (req, res) => {
         // Se valida el email duplicado excluyendo al propio usuario que se está editando,
         // para no rechazar el guardado si no cambió su email. LOWER() de los dos lados:
         // "ana@mail.com" y "ANA@mail.com" son el mismo email.
+        // Los dos ignoran la fila del propio usuario que se está editando.
+        const dniExistente = await pool.query(
+            'SELECT id_usuario FROM USUARIO WHERE dni = $1 AND id_usuario <> $2',
+            [dni, idUsuario]
+        );
+        if (dniExistente.rows.length > 0) {
+            return res.status(400).json({ message: 'El DNI ya está registrado' });
+        }
         const emailExistente = await pool.query(
-            'SELECT id_usuario FROM USUARIO WHERE LOWER(email) = LOWER($1) AND id_usuario <> $2', // ignora la fila del propio usuario que se está editando
+            'SELECT id_usuario FROM USUARIO WHERE LOWER(email) = LOWER($1) AND id_usuario <> $2',
             [email, idUsuario]
         );
         if (emailExistente.rows.length > 0) {
@@ -417,10 +433,10 @@ const actualizarUsuario = async (req, res) => {
             await client.query('BEGIN');
 
             const resultUsuario = await client.query(
-                `UPDATE USUARIO SET nombre = $1, apellido = $2, email = $3, estado = $4
-                 WHERE id_usuario = $5
+                `UPDATE USUARIO SET nombre = $1, apellido = $2, dni = $3, email = $4, estado = $5
+                 WHERE id_usuario = $6
                  RETURNING id_usuario, nombre, apellido, dni, email, rol, estado, creado_en, actualizado_en`,
-                [nombre, apellido, email, estado, idUsuario]
+                [nombre, apellido, dni, email, estado, idUsuario]
             );
             const usuarioActualizado = resultUsuario.rows[0];
 
@@ -449,7 +465,10 @@ const actualizarUsuario = async (req, res) => {
         }
     } catch (error) {
         if (error.code === '23505') {
-            return res.status(400).json({ message: 'El email ya está registrado' });
+            // Las comprobaciones de arriba ya cubren el caso normal; esto atrapa
+            // el choque con otra edición que haya entrado en el medio.
+            const campo = error.constraint === 'usuario_dni_key' ? 'DNI' : 'email';
+            return res.status(400).json({ message: `El ${campo} ya está registrado` });
         }
         console.error(error);
         return res.status(500).json({ message: 'Error interno del servidor' });
