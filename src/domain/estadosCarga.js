@@ -62,6 +62,12 @@ const FLUJO = Object.freeze([
  *   carga nueva. Del clic accidental protege el diálogo de confirmación que
  *   pide HU 2.4.
  *
+ * Pendiente no vuelve a disponible: pendiente no lo elige el administrador,
+ * la carga llega sola cuando se postula alguien. Volver atrás dejaba las
+ * postulaciones en espera sobre una carga que no se podía asignar (solo se
+ * asigna desde pendiente) y a la que esos camioneros no podían volver a
+ * postularse. Para no tomar a ninguno de los postulados, se cancela.
+ *
  * Cancelar sólo se puede desde "disponible" o "pendiente" (HU 2.4): desde
  * "en viaje" o "entregada" tiene que dar error.
  *
@@ -69,7 +75,7 @@ const FLUJO = Object.freeze([
  */
 const TRANSICIONES = Object.freeze({
     [ESTADOS.DISPONIBLE]: [ESTADOS.PENDIENTE, ESTADOS.CANCELADA],
-    [ESTADOS.PENDIENTE]: [ESTADOS.ACEPTADA, ESTADOS.DISPONIBLE, ESTADOS.CANCELADA],
+    [ESTADOS.PENDIENTE]: [ESTADOS.ACEPTADA, ESTADOS.CANCELADA],
     [ESTADOS.ACEPTADA]: [ESTADOS.EN_VIAJE, ESTADOS.PENDIENTE],
     [ESTADOS.EN_VIAJE]: [ESTADOS.ENTREGADA, ESTADOS.ACEPTADA],
     // Entregada se puede deshacer: marcarla de más es un error fácil de cometer

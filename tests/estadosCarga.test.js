@@ -29,7 +29,9 @@ test('cancelada sigue siendo la única salida sin retorno', () => {
 
 test('el resto del ciclo de vida no cambió', () => {
     assert.deepEqual(transicionesDesde(ESTADOS.DISPONIBLE), [ESTADOS.PENDIENTE, ESTADOS.CANCELADA]);
-    assert.deepEqual(transicionesDesde(ESTADOS.PENDIENTE), [ESTADOS.ACEPTADA, ESTADOS.DISPONIBLE, ESTADOS.CANCELADA]);
+    assert.deepEqual(transicionesDesde(ESTADOS.PENDIENTE), [ESTADOS.ACEPTADA, ESTADOS.CANCELADA]);
+    // Volver a disponible dejaba las postulaciones colgadas: ya no se permite.
+    assert.equal(transicionesDesde(ESTADOS.PENDIENTE).includes(ESTADOS.DISPONIBLE), false);
     assert.deepEqual(transicionesDesde(ESTADOS.ACEPTADA), [ESTADOS.EN_VIAJE, ESTADOS.PENDIENTE]);
     assert.deepEqual(transicionesDesde(ESTADOS.EN_VIAJE), [ESTADOS.ENTREGADA, ESTADOS.ACEPTADA]);
 });
