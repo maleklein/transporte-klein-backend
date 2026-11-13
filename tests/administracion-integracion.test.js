@@ -83,6 +83,8 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
                 { nombre: '-Diego' }, { nombre: 'x'.repeat(51) }, { apellido: 'Núñez2' },
                 { dni: '30.111.222' }, { dni: '123456' }, { email: 'diego@' }, { email: `${'x'.repeat(95)}@ex.test` },
                 { contraseña: 'corta' }, { contraseña: 'x'.repeat(73) }, { rol: 'chofer' },
+                // Emails con @ pero sin un dominio real.
+                { email: '!@!.com' }, { email: 'x@y..com' }, { email: 'juan@gmail' }, { email: '.juan@gmail.com' },
                 { ubicacion: '' }, { ubicacion: 'x'.repeat(151) }, { tipo_vehiculo: 'x'.repeat(101) },
                 { capacidad_kg: 'mucha' }, { capacidad_kg: 0 },
                 { dni: '20000001' }, { email: 'ADMIN-1@example.test' },
@@ -155,6 +157,17 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
                 dni: '20000001', email: 'admin-1@example.test', estado: 'activo' });
             assert.equal(admin.estado, 200);
             assert.equal(admin.cuerpo.camionero, undefined);
+        });
+
+        await t.test('el email acepta los formatos reales y rechaza los que no tienen dominio', async () => {
+            let dni = 32000000;
+            for (const email of ['juan.perez+trabajo@gmail.com', 'milena.seri@uap.edu.ar', "o'brien@mail.com",
+                'juan@mail-empresa.com.ar']) {
+                dni += 1;
+                const alta = await pedir('/usuarios', 1, 'POST', { nombre: 'Prueba', apellido: 'Email', dni: String(dni),
+                    email, contraseña: 'OtraClaveDePrueba', rol: 'administrador' });
+                assert.equal(alta.estado, 201, email);
+            }
         });
 
         await t.test('los nombres se guardan con mayúscula inicial, se escriban como se escriban', async () => {
