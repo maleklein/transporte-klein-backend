@@ -116,16 +116,18 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
             assert.equal(admin.cuerpo.camionero, undefined);
         });
 
-        const edicion = { nombre: 'Diego', apellido: 'Núñez', email: 'diego@example.test', estado: 'activo',
-            ubicacion: 'Rosario, Santa Fe', tipo_vehiculo: 'Chasis', capacidad_kg: 12000 };
+        const edicion = { nombre: 'Diego', apellido: 'Núñez', dni: '30111222', email: 'diego@example.test',
+            estado: 'activo', ubicacion: 'Rosario, Santa Fe', tipo_vehiculo: 'Chasis', capacidad_kg: 12000 };
 
         await t.test('la edición rechaza cada dato inválido', async () => {
             assert.equal((await pedir('/usuarios/abc', 1, 'PUT', edicion)).estado, 400);
             assert.equal((await pedir('/usuarios/999', 1, 'PUT', edicion)).estado, 404);
             const casos = [
-                { dni: '30111222' }, { rol: 'administrador' }, { contraseña: 'NuevaClave123' },
+                { rol: 'administrador' }, { contraseña: 'NuevaClave123' },
                 { nombre: '' }, { estado: undefined }, { nombre: 'D1ego' }, { apellido: '-' },
                 { email: 'sin-arroba' }, { estado: 'borrado' },
+                // El DNI ya se puede editar, pero con las mismas reglas del alta.
+                { dni: '' }, { dni: '30.111.222' }, { dni: '123456' }, { dni: '20000001' },
                 { ubicacion: '' }, { ubicacion: 'x'.repeat(151) }, { tipo_vehiculo: 'x'.repeat(101) },
                 { capacidad_kg: 'mucha' }, { capacidad_kg: -5 }, { email: 'Admin-1@Example.test' },
             ];
@@ -137,22 +139,24 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
 
         await t.test('la edición actualiza los datos y dar de baja corta el inicio de sesión', async () => {
             const cambio = await pedir(`/usuarios/${idNuevo}`, 1, 'PUT',
-                { ...edicion, apellido: 'Núñez Paz', capacidad_kg: 15000, estado: 'INACTIVO' });
+                { ...edicion, apellido: 'Núñez Paz', dni: '30999888', capacidad_kg: 15000, estado: 'INACTIVO' });
             assert.equal(cambio.estado, 200);
             assert.equal(cambio.cuerpo.apellido, 'Núñez Paz');
+            // El DNI se corrige: era el dato que no se podía arreglar si se cargaba mal.
+            assert.equal(cambio.cuerpo.dni, '30999888');
             assert.equal(cambio.cuerpo.estado, 'inactivo');
             assert.equal(Number(cambio.cuerpo.camionero.capacidad_kg), 15000);
             assert.equal((await pedir('/auth/login', null, 'POST', { email: nuevo.email, contraseña: nuevo.contraseña })).estado, 403);
 
             // Un administrador no tiene datos de camionero: alcanza con los campos comunes.
             const admin = await pedir('/usuarios/1', 1, 'PUT', { nombre: 'Ana María', apellido: 'Prueba',
-                email: 'admin-1@example.test', estado: 'activo' });
+                dni: '20000001', email: 'admin-1@example.test', estado: 'activo' });
             assert.equal(admin.estado, 200);
             assert.equal(admin.cuerpo.camionero, undefined);
         });
 
         await t.test('un administrador no puede darse de baja a sí mismo', async () => {
-            const propia = { nombre: 'Ana María', apellido: 'Prueba', email: 'admin-1@example.test' };
+            const propia = { nombre: 'Ana María', apellido: 'Prueba', dni: '20000001', email: 'admin-1@example.test' };
 
             const baja = await pedir('/usuarios/1', 1, 'PUT', { ...propia, estado: 'inactivo' });
             assert.equal(baja.estado, 409);
@@ -165,7 +169,7 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
                 email: 'fede@example.test', contraseña: 'OtraClaveDePrueba', rol: 'administrador' });
             assert.equal(otro.estado, 201);
             const bajaOtro = await pedir(`/usuarios/${otro.cuerpo.id_usuario}`, 1, 'PUT',
-                { nombre: 'Fede', apellido: 'Paz', email: 'fede@example.test', estado: 'inactivo' });
+                { nombre: 'Fede', apellido: 'Paz', dni: '30111224', email: 'fede@example.test', estado: 'inactivo' });
             assert.equal(bajaOtro.estado, 200);
             assert.equal(bajaOtro.cuerpo.estado, 'inactivo');
         });
