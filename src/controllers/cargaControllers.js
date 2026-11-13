@@ -5,7 +5,7 @@
  */
 
 const pool = require('../db');
-const { validarCampos, esFechaValida } = require('../validators/carga');
+const { validarCampos, esFechaValida, hoyEnArgentina, validarFechaNoPasada } = require('../validators/carga');
 const { registrarCambioEstado } = require('../services/registrarCambioEstado');
 const { obtenerDistanciaKm } = require('../services/mapas');
 const { notificarCargaNueva } = require('../services/notificaciones');
@@ -63,6 +63,23 @@ const valoresCostos = (costos) => [
     costos?.ganancia_estimada ?? null,
     costos?.parametros ?? null,
 ];
+
+/**
+ * Capacidad declarada del camionero, para que las pantallas sepan qué cargas
+ * puede llevar sin esperar al rechazo de la postulación (HU 4).
+ *
+ * Se agrega a cada carga como `capacidad_camionero_kg` y no se compara acá:
+ * la regla la sigue aplicando `crearPostulacion`, y el listado necesita el
+ * número para decir cuánto lleva el vehículo.
+ *
+ * @param {number} idUsuario - el camionero del token.
+ * @returns {Promise<number|null>} la capacidad en kg, o null si no la tiene cargada.
+ */
+const capacidadDelCamionero = async (idUsuario) => {
+    const { rows } = await pool.query('SELECT capacidad_kg FROM CAMIONERO WHERE id_usuario = $1', [idUsuario]);
+    const capacidad = rows[0]?.capacidad_kg;
+    return capacidad === null || capacidad === undefined ? null : Number(capacidad);
+};
 
 /**
  * Verifica que las dos localidades del body existan en el catálogo.
@@ -153,6 +170,8 @@ const calcularKmEntreLocalidades = async (idOrigen, idDestino) => {
  * Con los kilómetros estima también costo y ganancia (HU 10). Sin kilómetros
  * quedan en NULL, y tampoco un problema con los parámetros frena el alta.
  *
+ * La fecha de retiro no puede ser anterior a hoy (`validarFechaNoPasada`).
+ *
  * Respuestas: 201 con la carga creada · 400 si hay campos inválidos ·
  * 500 ante un error inesperado. El 401 (sin token) y el 403 (rol o cuenta
  * inactiva) los resuelven los middlewares antes de llegar acá.
@@ -163,6 +182,9 @@ const calcularKmEntreLocalidades = async (idOrigen, idDestino) => {
  */
 const crearCarga = async (req, res) => {
     const { errores, valores } = validarCampos(req.body);
+
+    const errorFecha = valores.fecha ? validarFechaNoPasada(valores.fecha) : null;
+    if (errorFecha) errores.fecha = errorFecha;
 
     if (Object.keys(errores).length > 0) {
         return res.status(400).json({
@@ -209,8 +231,8 @@ const crearCarga = async (req, res) => {
         const resultado = await client.query(
             `WITH nueva AS (
                  INSERT INTO CARGA (id_localidad_origen, id_localidad_destino, tipo_carga, peso_kg, fecha, observaciones, estado_actual, id_admin_creador, kilometros_estimados, estado_calculo_km,
-                                    costo_estimado, ganancia_estimada, parametros_costo)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+                                    costo_estimado, ganancia_estimada, parametros_costo, direccion_origen, direccion_destino)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15)
                  RETURNING *
              )
              SELECT c.id_carga,${COLUMNAS_UBICACION},
@@ -234,6 +256,8 @@ const crearCarga = async (req, res) => {
                 kilometros,
                 estadoCalculoKm,
                 ...valoresCostos(costos),
+                valores.direccion_origen,
+                valores.direccion_destino,
             ]
         );
 
@@ -290,6 +314,9 @@ const crearCarga = async (req, res) => {
  * no tiene endpoint propio de detalle: reusa lo que ya trajo el listado). Si
  * ningún registro matchea, responde 200 con `[]`: el "sin resultados" lo arma el front.
  *
+ * Al camionero no le muestra las que tienen el retiro vencido, y le agrega a
+ * cada una `capacidad_camionero_kg` (ver `capacidadDelCamionero`).
+ *
  * Respuestas: 200 con el array de cargas · 400 si `fecha` tiene formato inválido ·
  * 500 ante un error inesperado.
  *
@@ -331,6 +358,11 @@ const listarCargas = async (req, res) => {
         estadosVisibles = [filtroEstado];
     }
 
+    // Tampoco las que ya no puede retirar: con la fecha de retiro pasada, una
+    // carga sin asignar ya no es un viaje posible. El administrador sí las ve,
+    // para cambiarles la fecha o cancelarlas.
+    const retiroDesde = esCamionero ? hoyEnArgentina() : null;
+
     try {
         const resultado = await pool.query(
             `SELECT c.id_carga,${COLUMNAS_UBICACION},
@@ -345,9 +377,15 @@ const listarCargas = async (req, res) => {
                AND ($2 = '' OR c.fecha = $2::date)
                AND ($3 = '' OR pd.id_provincia = $3)
                AND ($4 = '' OR c.id_localidad_destino = $4)
+               AND ($5::date IS NULL OR c.fecha >= $5::date)
              ORDER BY c.fecha, c.id_carga`,
-            [estadosVisibles, filtroFecha, filtroProvincia, filtroLocalidad]
+            [estadosVisibles, filtroFecha, filtroProvincia, filtroLocalidad, retiroDesde]
         );
+
+        if (esCamionero) {
+            const capacidad = await capacidadDelCamionero(req.usuario.id);
+            for (const carga of resultado.rows) carga.capacidad_camionero_kg = capacidad;
+        }
 
         return res.status(200).json(resultado.rows);
     } catch (error) {
@@ -415,6 +453,10 @@ const obtenerCarga = async (req, res) => {
             for (const campo of CAMPOS_COSTOS) {
                 delete carga[campo];
             }
+        }
+
+        if (req.usuario?.rol === 'camionero') {
+            carga.capacidad_camionero_kg = await capacidadDelCamionero(req.usuario.id);
         }
 
         return res.status(200).json(carga);
@@ -491,13 +533,13 @@ const obtenerHistorialCarga = async (req, res) => {
 };
 
 /**
- * PUT /cargas/:id (HU 2.2): edita los seis campos de una carga existente
- * (origen, destino, tipo_carga, peso, fecha, observaciones).
+ * PUT /cargas/:id (HU 2.2): edita los campos de una carga existente
+ * (origen, destino, sus direcciones, tipo_carga, peso, fecha, observaciones).
  *
  * Usa las mismas validaciones que el alta (`validarCampos`), así que un campo
  * inválido da exactamente el mismo error que en `crearCarga`. No admite carga
- * parcial: hay que volver a mandar los seis campos, igual que en
- * `actualizarUsuario`.
+ * parcial: hay que volver a mandar todos los campos, igual que en
+ * `actualizarUsuario`. Una fecha anterior a hoy se rechaza sólo si cambió.
  *
  * Bloquea la edición si la carga está 'en_viaje' o 'entregada': en los dos
  * casos el bloqueo dura mientras dure ese estado, y para corregir algo hay que
@@ -517,7 +559,7 @@ const obtenerHistorialCarga = async (req, res) => {
  * campos inválidos · 404 si no existe una carga con ese id · 409 si la carga
  * está en un estado que ya no admite edición · 500 ante un error inesperado.
  *
- * @param {import('express').Request} req - request de Express. Params: id. Body: los seis campos de la carga.
+ * @param {import('express').Request} req - request de Express. Params: id. Body: los campos de la carga.
  * @param {import('express').Response} res - response de Express.
  * @returns {Promise<void>}
  */
@@ -539,7 +581,9 @@ const actualizarCarga = async (req, res) => {
         // Se busca la carga primero para poder distinguir el 404 (no existe) del
         // 409 (existe pero su estado ya no admite edición).
         const cargaExistente = await pool.query(
-            'SELECT id_carga, estado_actual, id_localidad_origen, id_localidad_destino FROM CARGA WHERE id_carga = $1',
+            `SELECT id_carga, estado_actual, id_localidad_origen, id_localidad_destino,
+                    TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha
+             FROM CARGA WHERE id_carga = $1`,
             [idCarga]
         );
 
@@ -563,7 +607,14 @@ const actualizarCarga = async (req, res) => {
             });
         }
 
+        const anterior = cargaExistente.rows[0];
+
+        // La fecha sólo se controla si cambió: si no, una carga aceptada cuyo
+        // retiro ya pasó no podría corregir ningún otro dato.
+        const errorFecha = valores.fecha === anterior.fecha ? null : validarFechaNoPasada(valores.fecha);
+
         const erroresLocalidad = await verificarLocalidades(pool, valores);
+        if (errorFecha) erroresLocalidad.fecha = errorFecha;
         if (Object.keys(erroresLocalidad).length > 0) {
             return res.status(400).json({
                 message: 'Hay campos con errores',
@@ -571,7 +622,6 @@ const actualizarCarga = async (req, res) => {
             });
         }
 
-        const anterior = cargaExistente.rows[0];
         const cambioRuta =
             anterior.id_localidad_origen.trim() !== valores.origen_id ||
             anterior.id_localidad_destino.trim() !== valores.destino_id;
@@ -593,6 +643,7 @@ const actualizarCarga = async (req, res) => {
             `WITH modificada AS (
                  UPDATE CARGA
                  SET id_localidad_origen = $1, id_localidad_destino = $2, tipo_carga = $3, peso_kg = $4, fecha = $5, observaciones = $6,
+                     direccion_origen = $14, direccion_destino = $15,
                      kilometros_estimados = CASE WHEN $8 THEN $9::numeric ELSE kilometros_estimados END,
                      estado_calculo_km = CASE WHEN $8 THEN $10::varchar ELSE estado_calculo_km END,
                      costo_estimado = CASE WHEN $8 THEN $11::numeric ELSE costo_estimado END,
@@ -621,6 +672,8 @@ const actualizarCarga = async (req, res) => {
                 kilometros,
                 estadoCalculoKm,
                 ...valoresCostos(costos),
+                valores.direccion_origen,
+                valores.direccion_destino,
             ]
         );
 

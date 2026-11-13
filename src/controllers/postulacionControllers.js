@@ -9,6 +9,7 @@ const pool = require('../db');
 const { registrarCambioEstado } = require('../services/registrarCambioEstado');
 const { COLUMNAS_UBICACION, JOIN_UBICACION } = require('../services/ubicacionCarga');
 const { ESTADOS, ESTADOS_ABIERTOS } = require('../domain/estadosCarga');
+const { hoyEnArgentina } = require('../validators/carga');
 
 /**
  * POST /cargas/:id/postulaciones: registra la postulación del camionero del
@@ -25,16 +26,17 @@ const { ESTADOS, ESTADOS_ABIERTOS } = require('../domain/estadosCarga');
  * transacción, con la carga bloqueada (`FOR UPDATE`): si dos camioneros se
  * postulan a la vez a una disponible, el segundo espera y ya la ve pendiente.
  *
- * También se rechaza si la carga pesa más que la capacidad declarada del
- * camionero (igual peso que capacidad sí es válido). Si el camionero no
- * cargó su capacidad en el perfil, se rechaza también: sin ese dato no hay
- * forma de saber si puede llevarla.
+ * Se rechaza si la fecha de retiro ya pasó, y también si la carga pesa más
+ * que la capacidad declarada del camionero (igual peso que capacidad sí es
+ * válido). Si el camionero no cargó su capacidad en el perfil, se rechaza
+ * también: sin ese dato no hay forma de saber si puede llevarla.
  *
  * Respuestas: 201 con la postulación · 400 si `id` no es numérico ·
  * 403 si el usuario no tiene perfil de camionero · 404 si la carga no existe ·
- * 409 si la carga ya no recibe postulaciones, si ya se había postulado, si
- * la carga supera la capacidad del camionero o si el camionero no tiene
- * capacidad cargada en su perfil · 500 ante un error inesperado.
+ * 409 si la carga ya no recibe postulaciones, si su fecha de retiro ya pasó,
+ * si ya se había postulado, si la carga supera la capacidad del camionero o
+ * si el camionero no tiene capacidad cargada en su perfil · 500 ante un
+ * error inesperado.
  *
  * @param {import('express').Request} req - Params: id (id de la carga). req.usuario lo provee verifyToken.
  * @param {import('express').Response} res
@@ -56,7 +58,8 @@ const crearPostulacion = async (req, res) => {
 
         // 2. Validar que la carga exista y siga recibiendo postulaciones
         const cargaResult = await client.query(
-            'SELECT estado_actual, peso_kg FROM CARGA WHERE id_carga = $1 FOR UPDATE',
+            `SELECT estado_actual, peso_kg, TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha
+             FROM CARGA WHERE id_carga = $1 FOR UPDATE`,
             [idCarga]
         );
 
@@ -65,10 +68,17 @@ const crearPostulacion = async (req, res) => {
             return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
         }
 
-        const { estado_actual: estadoActual, peso_kg: pesoCarga } = cargaResult.rows[0];
+        const { estado_actual: estadoActual, peso_kg: pesoCarga, fecha } = cargaResult.rows[0];
         if (!ESTADOS_ABIERTOS.includes(estadoActual)) {
             await client.query('ROLLBACK');
             return res.status(409).json({ message: 'La carga ya no se encuentra disponible para postulaciones' });
+        }
+
+        // Con el retiro vencido ya no es un viaje posible: el administrador
+        // tiene que cambiarle la fecha o cancelarla.
+        if (fecha < hoyEnArgentina()) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ message: 'La fecha de retiro de esta carga ya pasó: no recibe más postulaciones.' });
         }
 
         // 2.b. Validar que el camionero pueda cargar el peso de la carga.

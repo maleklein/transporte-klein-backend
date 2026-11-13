@@ -80,7 +80,7 @@ Los tests de integración necesitan un PostgreSQL vacío (los datos del `.env`)
 y estas variables:
 
 ```bash
-MATCHING_DB_TEST=1 CALIFICACIONES_DB_TEST=1 ADMINISTRACION_DB_TEST=1 POSTULACION_DB_TEST=1 npm test
+MATCHING_DB_TEST=1 CALIFICACIONES_DB_TEST=1 ADMINISTRACION_DB_TEST=1 CARGAS_DB_TEST=1 POSTULACION_DB_TEST=1 npm test
 ```
 
 Cada test arma sus propias tablas y las descarta. Ojo: el workflow de CI no

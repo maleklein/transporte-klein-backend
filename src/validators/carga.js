@@ -13,7 +13,21 @@
 const CAMPOS_TEXTO = {
     tipo_carga: 100,
     observaciones: 1000,
+    direccion_origen: 150,
+    direccion_destino: 150,
 };
+
+/**
+ * Campos de texto que se pueden dejar vacíos. Vacíos se guardan como NULL.
+ *
+ * Las observaciones no siempre hacen falta. La dirección tampoco: a veces el
+ * origen o el destino es un campo o un establecimiento rural, sin calle ni
+ * número, y alcanza con la localidad.
+ */
+const CAMPOS_OPCIONALES = ['observaciones', 'direccion_origen', 'direccion_destino'];
+
+/** Zona horaria del negocio: "hoy" es el día en Argentina, no en el servidor. */
+const ZONA_HORARIA = 'America/Argentina/Buenos_Aires';
 
 /**
  * Origen y destino, que ya no son texto libre sino ids de localidad del
@@ -128,10 +142,39 @@ const esFechaValida = (valor) => {
 };
 
 /**
- * Valida los seis campos de una carga (origen_id, destino_id, tipo_carga,
- * peso, fecha, observaciones) contra un body de Express. Todos son
- * obligatorios: la usan tanto el alta como la edición, y ninguna de las dos
- * admite carga parcial.
+ * Fecha de hoy en Argentina, en formato AAAA-MM-DD.
+ *
+ * Con la hora del servidor (UTC en Railway), entre las 21 y la medianoche de
+ * acá ya sería "mañana" y una carga para hoy se tomaría como vencida.
+ *
+ * @param {Date} [ahora] - el momento a convertir; por defecto, ahora.
+ * @returns {string} la fecha, ej '2026-11-13'.
+ */
+const hoyEnArgentina = (ahora = new Date()) =>
+    // en-CA formatea las fechas como AAAA-MM-DD.
+    new Intl.DateTimeFormat('en-CA', { timeZone: ZONA_HORARIA }).format(ahora);
+
+/**
+ * Rechaza una fecha de retiro anterior a hoy. Hoy sí se acepta.
+ *
+ * Es aparte de `validarCampos` porque la edición sólo la aplica si la fecha
+ * cambió: una carga ya en camino tiene, con toda razón, una fecha pasada, y
+ * eso no puede impedir corregirle otro dato.
+ *
+ * @param {string} fecha - fecha ya validada, AAAA-MM-DD.
+ * @param {string} [hoy] - fecha de hoy, AAAA-MM-DD; por defecto, la de Argentina.
+ * @returns {string|null} el mensaje de error, o null si la fecha sirve.
+ */
+const validarFechaNoPasada = (fecha, hoy = hoyEnArgentina()) =>
+    // Con el formato AAAA-MM-DD, comparar el texto es comparar las fechas.
+    fecha < hoy ? 'La fecha de retiro no puede ser anterior a hoy' : null;
+
+/**
+ * Valida los campos de una carga (origen_id, destino_id, direccion_origen,
+ * direccion_destino, tipo_carga, peso, fecha, observaciones) contra un body
+ * de Express. La usan tanto el alta como la edición, y ninguna de las dos
+ * admite carga parcial: los campos opcionales (`CAMPOS_OPCIONALES`) que no
+ * vienen quedan en null, no "sin cambios".
  *
  * Acumula todos los errores en vez de cortar en el primero, para que el
  * formulario pueda marcar de una vez todos los campos con problema.
@@ -139,7 +182,7 @@ const esFechaValida = (valor) => {
  * @param {Record<string, unknown>} body - req.body de Express.
  * @returns {{
  *   errores: Record<string, string>,
- *   valores: {origen_id?: string, destino_id?: string, tipo_carga?: string, observaciones?: string, peso?: number, fecha?: string}
+ *   valores: {origen_id?: string, destino_id?: string, direccion_origen?: string|null, direccion_destino?: string|null, tipo_carga?: string, observaciones?: string|null, peso?: number, fecha?: string}
  * }} errores agrupados por campo, y los valores ya limpios/normalizados de los campos que pasaron.
  */
 const validarCampos = (body) => {
@@ -151,6 +194,13 @@ const validarCampos = (body) => {
 
         // Se exige texto de verdad: si viniera un objeto o un array, el String()
         // lo guardaría como "[object Object]" o "a,b" sin que nadie se entere.
+        const opcional = CAMPOS_OPCIONALES.includes(campo);
+
+        if (opcional && (valor === undefined || valor === null)) {
+            valores[campo] = null;
+            continue;
+        }
+
         if (typeof valor !== 'string') {
             errores[campo] = valor === undefined || valor === null
                 ? `El campo '${campo}' es obligatorio`
@@ -160,7 +210,9 @@ const validarCampos = (body) => {
 
         const limpio = limpiarTexto(valor);
 
-        if (limpio === '') {
+        if (limpio === '' && opcional) {
+            valores[campo] = null;
+        } else if (limpio === '') {
             errores[campo] = `El campo '${campo}' es obligatorio`;
         } else if (limpio.length > largoMaximo) {
             errores[campo] = `El campo '${campo}' no puede superar los ${largoMaximo} caracteres`;
@@ -217,7 +269,10 @@ const validarCampos = (body) => {
 module.exports = {
     validarCampos,
     esFechaValida,
+    hoyEnArgentina,
+    validarFechaNoPasada,
     CAMPOS_TEXTO,
+    CAMPOS_OPCIONALES,
     CAMPOS_LOCALIDAD,
     PESO_MINIMO,
     PESO_MAXIMO,

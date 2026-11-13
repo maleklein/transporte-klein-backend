@@ -18,6 +18,9 @@
  * El CASE evita el "Santa Fe, Santa Fe" de las capitales que se llaman igual
  * que su provincia, y el caso extremo de CABA, que repetiría el nombre entero.
  *
+ * La dirección (calle y número) es opcional y va aparte, sin mezclarla con
+ * `origen` y `destino`: a veces el lugar es un campo y no tiene.
+ *
  * Si una consulta que devuelve una carga se quedara sin estos campos, la
  * pantalla de detalle se quedaría sin la ruta después de esa operación.
  */
@@ -28,12 +31,14 @@ const COLUMNAS_UBICACION = `
                     po.nombre              AS origen_provincia,
                     CASE WHEN lo.nombre = po.nombre THEN lo.nombre
                          ELSE lo.nombre || ', ' || po.nombre END AS origen,
+                    c.direccion_origen,
                     c.id_localidad_destino AS destino_id,
                     ld.nombre              AS destino_localidad,
                     pd.id_provincia        AS destino_provincia_id,
                     pd.nombre              AS destino_provincia,
                     CASE WHEN ld.nombre = pd.nombre THEN ld.nombre
-                         ELSE ld.nombre || ', ' || pd.nombre END AS destino`;
+                         ELSE ld.nombre || ', ' || pd.nombre END AS destino,
+                    c.direccion_destino`;
 
 /** Los JOIN que hacen falta para que `COLUMNAS_UBICACION` resuelva. */
 const JOIN_UBICACION = `
