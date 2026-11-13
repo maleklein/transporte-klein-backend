@@ -100,7 +100,7 @@ test('crearPostulacion valida la capacidad del camionero sin tocar la base real'
         await crearPostulacion(pedido(4, 3), res);
 
         assert.equal(res.codigo, 409);
-        assert.equal(res.cuerpo.message, 'No podés postularte sin cargar la capacidad de tu vehículo en tu perfil.');
+        assert.equal(res.cuerpo.message, 'No podés postularte porque tu vehículo no tiene la capacidad cargada. Pedile a un administrador que la cargue.');
         assert.ok(client.consultas.some((q) => q === 'ROLLBACK'));
         assert.ok(!client.consultas.some((q) => q.startsWith('INSERT INTO POSTULACION')));
     });

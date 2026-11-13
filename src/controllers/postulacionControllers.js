@@ -86,7 +86,7 @@ const crearPostulacion = async (req, res) => {
         if (camioneroResult.rows.length > 0 && capacidadCamionero === null) {
             await client.query('ROLLBACK');
             return res.status(409).json({
-                message: 'No podés postularte sin cargar la capacidad de tu vehículo en tu perfil.',
+                message: 'No podés postularte porque tu vehículo no tiene la capacidad cargada. Pedile a un administrador que la cargue.',
             });
         }
 

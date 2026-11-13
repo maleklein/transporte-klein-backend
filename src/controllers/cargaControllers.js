@@ -432,9 +432,14 @@ const obtenerCarga = async (req, res) => {
  * es NULL (cambio hecho por el sistema, no por una persona) se devuelve el
  * texto "Sistema" en vez de nombre/apellido.
  *
+ * El camionero ve la bitácora de las mismas cargas que puede abrir con
+ * `obtenerCarga`: las abiertas a postulaciones y la que tiene asignada. Antes
+ * podía leer la de cualquier carga pidiéndola por id.
+ *
  * Respuestas: 200 con el array de la bitácora (puede ser vacío si la carga no
- * existe, igual que `listarCargas`) · 400 si `id` no es numérico ·
- * 500 ante un error inesperado.
+ * existe, igual que `listarCargas`) · 400 si `id` no es numérico · 404 si es
+ * un camionero y la carga no es una de las que puede ver · 500 ante un error
+ * inesperado.
  *
  * @param {import('express').Request} req - request de Express. Params: id.
  * @param {import('express').Response} res - response de Express.
@@ -447,6 +452,22 @@ const obtenerHistorialCarga = async (req, res) => {
     }
 
     try {
+        // Misma regla que `obtenerCarga`: al camionero se le responde 404 (y no
+        // 403) para no confirmarle que la carga existe.
+        if (req.usuario?.rol === 'camionero') {
+            const { rows } = await pool.query(
+                'SELECT estado_actual, id_camionero_asignado FROM CARGA WHERE id_carga = $1',
+                [idCarga]
+            );
+            const visible = rows.length > 0 && (
+                ESTADOS_ABIERTOS.includes(rows[0].estado_actual) ||
+                rows[0].id_camionero_asignado === req.usuario.id
+            );
+            if (!visible) {
+                return res.status(404).json({ message: `No existe una carga con id ${idCarga}` });
+            }
+        }
+
         const resultado = await pool.query(
             `SELECT ec.id_estado_carga, ec.id_carga, ec.estado_anterior, ec.estado_nuevo,
                     ec.id_actor,
@@ -691,6 +712,15 @@ const cambiarEstadoCarga = async (req, res) => {
 
             return res.status(409).json({
                 message: `No se puede pasar de '${estadoActual}' a '${estadoNuevo}'. ${detalle}`,
+            });
+        }
+
+        // A pendiente la lleva la primera postulación (HU 4). Pasarla a mano
+        // dejaba una carga pendiente sin ningún postulado para asignar.
+        if (estadoActual === ESTADOS.DISPONIBLE && estadoNuevo === ESTADOS.PENDIENTE) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                message: "Una carga pasa a 'pendiente' sola, cuando se postula el primer camionero.",
             });
         }
 

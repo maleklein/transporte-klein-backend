@@ -57,6 +57,21 @@ test('HU11: API y PostgreSQL reales, permisos, entrega y reputación', {
             assert.equal(viaje.cuerpo.contraparte.id_usuario, 2);
             assert.equal(viaje.cuerpo.puede_calificar, true);
         });
+        await t.test('revisión del 13/11: historial, paso a pendiente y login sin mayúsculas', async () => {
+            // El camionero solo ve la bitácora de las cargas que puede abrir.
+            assert.equal((await pedir('/cargas/1/historial', 4)).estado, 404);
+            assert.equal((await pedir('/cargas/1/historial', 2)).estado, 200);
+            assert.equal((await pedir('/cargas/4/historial', 4)).estado, 200);
+            assert.equal((await pedir('/cargas/1/historial', 1)).estado, 200);
+            // A pendiente solo se llega con una postulación.
+            const aMano = await pedir('/cargas/4/estado', 1, 'PATCH', { estado: 'pendiente' });
+            assert.equal(aMano.estado, 409);
+            assert.equal(aMano.cuerpo.message, "Una carga pasa a 'pendiente' sola, cuando se postula el primer camionero.");
+            // El login no distingue mayúsculas en el email, igual que el alta.
+            const login = await pedir('/auth/login', null, 'POST', { email: ' HU11-1@Example.TEST ', contraseña: 'ClaveSoloParaPruebas11' });
+            assert.equal(login.estado, 200);
+        });
+
         await t.test('sesión, cuenta activa y participación obligatorias', async () => {
             for (const [id, esperado] of [[null,401],[3,403],[4,403],[5,403]]) assert.equal((await calificar(id)).estado, esperado);
             assert.equal((await pedir('/cargas/1/calificacion', 4)).estado, 403);
