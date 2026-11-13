@@ -97,7 +97,8 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
 
         let idNuevo;
         await t.test('el alta de un camionero crea las dos filas y el usuario puede iniciar sesión', async () => {
-            const alta = await pedir('/usuarios', 1, 'POST', { ...nuevo, nombre: '  Diego ', rol: 'CAMIONERO' });
+            // Se escribe en minúscula y con espacios de más a propósito: se guarda prolijo.
+            const alta = await pedir('/usuarios', 1, 'POST', { ...nuevo, nombre: '  diego ', rol: 'CAMIONERO' });
             assert.equal(alta.estado, 201);
             assert.equal(alta.cuerpo.nombre, 'Diego');
             assert.equal(alta.cuerpo.rol, 'camionero');
@@ -139,8 +140,9 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
 
         await t.test('la edición actualiza los datos y dar de baja corta el inicio de sesión', async () => {
             const cambio = await pedir(`/usuarios/${idNuevo}`, 1, 'PUT',
-                { ...edicion, apellido: 'Núñez Paz', dni: '30999888', capacidad_kg: 15000, estado: 'INACTIVO' });
+                { ...edicion, apellido: 'NÚÑEZ   paz', dni: '30999888', capacidad_kg: 15000, estado: 'INACTIVO' });
             assert.equal(cambio.estado, 200);
+            // Al editar también se acomoda: mayúscula inicial y un solo espacio.
             assert.equal(cambio.cuerpo.apellido, 'Núñez Paz');
             // El DNI se corrige: era el dato que no se podía arreglar si se cargaba mal.
             assert.equal(cambio.cuerpo.dni, '30999888');
@@ -153,6 +155,24 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
                 dni: '20000001', email: 'admin-1@example.test', estado: 'activo' });
             assert.equal(admin.estado, 200);
             assert.equal(admin.cuerpo.camionero, undefined);
+        });
+
+        await t.test('los nombres se guardan con mayúscula inicial, se escriban como se escriban', async () => {
+            const casos = [
+                ['ana maría', 'de los santos', 'Ana María', 'De Los Santos'],
+                ['JUAN', 'PÉREZ', 'Juan', 'Pérez'],
+                ["malena", "o'brien", 'Malena', "O'Brien"],
+                ['ana-lucía', 'paz  silva', 'Ana-Lucía', 'Paz Silva'],
+            ];
+            let dni = 31000000;
+            for (const [nombre, apellido, esperadoNombre, esperadoApellido] of casos) {
+                dni += 1;
+                const alta = await pedir('/usuarios', 1, 'POST', { nombre, apellido, dni: String(dni),
+                    email: `u${dni}@example.test`, contraseña: 'OtraClaveDePrueba', rol: 'administrador' });
+                assert.equal(alta.estado, 201, JSON.stringify([nombre, apellido]));
+                assert.equal(alta.cuerpo.nombre, esperadoNombre);
+                assert.equal(alta.cuerpo.apellido, esperadoApellido);
+            }
         });
 
         await t.test('un administrador no puede darse de baja a sí mismo', async () => {

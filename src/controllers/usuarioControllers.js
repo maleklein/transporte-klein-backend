@@ -49,7 +49,7 @@ const validarNombreApellido = (valor, etiqueta) => {
         return { error: `El ${etiqueta} solo puede contener letras, espacios, guiones y apóstrofes.` };
     }
 
-    return { valor: texto };
+    return { valor: conMayusculaInicial(texto) };
 };
 
 // HU 1.1: el DNI son 7 u 8 dígitos exactos, sin puntos ni espacios.
@@ -71,6 +71,23 @@ const LARGO_MAXIMO_CONTRASEÑA = 72;
 // INSERT/UPDATE contra el VARCHAR de la columna con un 500 en vez de un 400.
 const LARGO_MAXIMO_UBICACION = 150;
 const LARGO_MAXIMO_TIPO_VEHICULO = 100;
+
+/**
+ * Escribe un nombre o apellido con mayúscula inicial en cada palabra y el
+ * resto en minúscula, para que el listado no mezcle "evans muv" con "Evans Muv"
+ * según cómo lo haya tipeado cada quien.
+ *
+ * Los espacios de más se colapsan en uno solo. Las palabras se separan por
+ * espacio, guion o apóstrofe, así "ana-maría" y "o'brien" también quedan bien.
+ *
+ * @param {string} texto - el valor ya recortado y validado.
+ * @returns {string} el texto con cada palabra en mayúscula inicial.
+ */
+const conMayusculaInicial = (texto) =>
+    texto
+        .replace(/\s+/g, ' ')
+        .toLowerCase()
+        .replace(/(^|[\s'-])(\p{L})/gu, (_, separador, letra) => separador + letra.toUpperCase());
 
 /**
  * Valida y recorta el DNI (HU 1.1): exactamente 7 u 8 dígitos, sin puntos,
