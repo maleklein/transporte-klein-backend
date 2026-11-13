@@ -76,6 +76,13 @@ async function consultarViaje(id, usuario, db = pool) {
         motivo: emitida ? 'Ya calificaste este viaje.' : carga.estado_actual !== 'entregada' ? 'Podrás calificar cuando la carga esté entregada.' : null };
 }
 
+// Calificaciones por página del historial del perfil. Con 20 la pantalla quedaba
+// demasiado larga.
+const POR_PAGINA = 5;
+
+// Cantidad de calificaciones por puntaje, de 1 a 5, cuando no hay ninguna.
+const SIN_CALIFICACIONES = Object.freeze({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });
+
 async function consultarPerfil(id, pagina, usuario, db = pool) {
     const idUsuario = validarId(id);
     const numeroPagina = pagina === undefined ? 1 : validarId(pagina);
@@ -89,8 +96,8 @@ async function consultarPerfil(id, pagina, usuario, db = pool) {
     // Un administrador no recibe calificaciones: nunca es la contraparte
     // calificada, así que ni la reputación ni el historial las muestran.
     if (perfil.rows[0].rol === 'administrador') {
-        return { usuario: perfil.rows[0], reputacion: { ...calcularReputacion([]), total: 0 },
-            historial: [], pagina: numeroPagina, por_pagina: 20, hay_mas: false };
+        return { usuario: perfil.rows[0], reputacion: { ...calcularReputacion([]), total: 0, distribucion: SIN_CALIFICACIONES },
+            historial: [], pagina: numeroPagina, por_pagina: POR_PAGINA, hay_mas: false };
     }
     // Una sola lectura para que promedio, total e historial correspondan al mismo estado.
     const { rows } = await db.query(`WITH evaluaciones AS (
@@ -98,12 +105,16 @@ async function consultarPerfil(id, pagina, usuario, db = pool) {
             ROW_NUMBER() OVER (ORDER BY c.creado_en DESC, c.id_calificacion DESC) AS posicion
         FROM CALIFICACION c JOIN USUARIO u ON u.id_usuario = c.id_emisor WHERE c.id_receptor = $1
     ) SELECT COUNT(*)::integer AS total,
+        -- Cuántas hay de cada puntaje, de todas y no solo de la página: son las barras del perfil.
+        json_build_object('1', COUNT(*) FILTER (WHERE puntaje = 1), '2', COUNT(*) FILTER (WHERE puntaje = 2),
+            '3', COUNT(*) FILTER (WHERE puntaje = 3), '4', COUNT(*) FILTER (WHERE puntaje = 4),
+            '5', COUNT(*) FILTER (WHERE puntaje = 5)) AS distribucion,
         COALESCE(json_agg(e ORDER BY posicion) FILTER (WHERE posicion <= 10), '[]') AS recientes,
-        COALESCE(json_agg(e ORDER BY posicion) FILTER (WHERE posicion > $2 AND posicion <= $2 + 20), '[]') AS historial
-        FROM evaluaciones e`, [idUsuario, (numeroPagina - 1) * 20]);
-    const { recientes, total, historial } = rows[0];
-    return { usuario: perfil.rows[0], reputacion: { ...calcularReputacion(recientes), total },
-        historial, pagina: numeroPagina, por_pagina: 20, hay_mas: numeroPagina * 20 < total };
+        COALESCE(json_agg(e ORDER BY posicion) FILTER (WHERE posicion > $2 AND posicion <= $2 + $3), '[]') AS historial
+        FROM evaluaciones e`, [idUsuario, (numeroPagina - 1) * POR_PAGINA, POR_PAGINA]);
+    const { recientes, total, distribucion, historial } = rows[0];
+    return { usuario: perfil.rows[0], reputacion: { ...calcularReputacion(recientes), total, distribucion },
+        historial, pagina: numeroPagina, por_pagina: POR_PAGINA, hay_mas: numeroPagina * POR_PAGINA < total };
 }
 
 module.exports = { emitirCalificacion, consultarViaje, consultarPerfil, ErrorCalificacion, validarId };

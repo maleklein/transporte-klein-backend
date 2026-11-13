@@ -11,7 +11,7 @@ Reglas acordadas con Tomás el 2 de noviembre de 2026 para concretar RN-03.
 - Fórmula: suma de `(puntaje × peso)` dividida por suma de pesos utilizados. Se redondea a dos decimales al mostrar. Sin evaluaciones se devuelve `null` y se muestra «Sin calificaciones».
 - Ejemplo: última evaluación 5 y anterior 3 → `(5×10 + 3×9)/19 = 4,05`. La undécima más antigua no influye, pero se conserva en el historial.
 - Los administradores pueden consultar perfiles de reputación. Un camionero puede consultar el suyo y el del administrador de sus viajes entregados. El perfil compartido muestra únicamente nombre, apellido, rol y calificaciones; no DNI, email ni credenciales.
-- El historial se pagina de a 20. Su orden es el mismo usado por la reputación.
+- El historial se pagina de a 5. Su orden es el mismo usado por la reputación.
 
 ## API
 
