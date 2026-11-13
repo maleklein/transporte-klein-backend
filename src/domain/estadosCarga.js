@@ -55,12 +55,11 @@ const FLUJO = Object.freeze([
  * que es justamente lo que el SRS (§979) espera de la bitácora: "permite
  * auditar cualquier intento de transición inválida".
  *
- * Los dos estados finales salen de reglas distintas:
- * - `entregada` por RN-01: "una carga entregada no puede volver a estados
- *   anteriores". Es un hecho físico, la mercadería ya llegó.
- * - `cancelada` por decisión del equipo: si hace falta, se da de alta una
- *   carga nueva. Del clic accidental protege el diálogo de confirmación que
- *   pide HU 2.4.
+ * `cancelada` es el único estado final, por decisión del equipo: si hace
+ * falta, se da de alta una carga nueva. Del clic accidental protege el diálogo
+ * de confirmación que pide HU 2.4. `entregada` dejó de serlo (RN-01
+ * actualizada): se puede volver a `en_viaje` para corregir una entrega marcada
+ * por error.
  *
  * Pendiente no vuelve a disponible: pendiente no lo elige el administrador,
  * la carga llega sola cuando se postula alguien. Volver atrás dejaba las

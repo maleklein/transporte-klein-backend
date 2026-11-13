@@ -74,7 +74,7 @@ test('HU4: la postulación respeta la capacidad del camionero, comparada como n�
         await t.test('camionero sin capacidad cargada en el perfil: rechaza con 409', async () => {
             const resultado = await postular(4, 3);
             assert.equal(resultado.estado, 409);
-            assert.equal(resultado.cuerpo.message, 'No podés postularte sin cargar la capacidad de tu vehículo en tu perfil.');
+            assert.equal(resultado.cuerpo.message, 'No podés postularte porque tu vehículo no tiene la capacidad cargada. Pedile a un administrador que la cargue.');
         });
     } finally {
         if (servidor) await new Promise((resolve) => servidor.close(resolve));

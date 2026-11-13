@@ -24,7 +24,9 @@ const login = async (req, res) => {
         }
 
         // 1. Buscar si el usuario existe en la base de datos
-        const result = await pool.query('SELECT * FROM USUARIO WHERE email = $1', [email]);
+        // Sin distinguir mayúsculas, como el alta, que no deja registrar el
+        // mismo email escrito distinto: "Juan@Mail.com" entra con juan@mail.com.
+        const result = await pool.query('SELECT * FROM USUARIO WHERE LOWER(email) = LOWER($1)', [String(email).trim()]);
 
         // Mismo mensaje para "no existe" y "contraseña incorrecta": no revelamos
         // si el email está registrado.
