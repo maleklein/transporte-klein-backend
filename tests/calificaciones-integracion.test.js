@@ -100,7 +100,10 @@ test('HU11: API y PostgreSQL reales, permisos, entrega y reputación', {
             assert.equal((await pedir('/usuarios/2/reputacion?pagina=abc', 1)).estado, 400);
             const perfil = await pedir('/usuarios/2/reputacion', 2);
             assert.equal(perfil.cuerpo.reputacion.promedio, 5);
-            assert.deepEqual(Object.keys(perfil.cuerpo.usuario).sort(), ['apellido','id_usuario','nombre','rol']);
+            // El propio trae también email, DNI y alta; el de otro (incluso para un administrador), no.
+            assert.deepEqual(Object.keys(perfil.cuerpo.usuario).sort(), ['apellido','creado_en','dni','email','id_usuario','nombre','rol']);
+            assert.deepEqual(Object.keys((await pedir('/usuarios/1/reputacion', 2)).cuerpo.usuario).sort(), ['apellido','id_usuario','nombre','rol']);
+            assert.deepEqual(Object.keys((await pedir('/usuarios/2/reputacion', 1)).cuerpo.usuario).sort(), ['apellido','id_usuario','nombre','rol']);
             const vacio = await pedir('/usuarios/4/reputacion', 4);
             assert.equal(vacio.cuerpo.reputacion.promedio, null);
             assert.deepEqual(vacio.cuerpo.reputacion.distribucion, { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });

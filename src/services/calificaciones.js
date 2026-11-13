@@ -91,7 +91,11 @@ async function consultarPerfil(id, pagina, usuario, db = pool) {
             AND id_camionero_asignado = $2 AND estado_actual = 'entregada' LIMIT 1`, [idUsuario, usuario.id]);
         if (!permiso.rows.length) throw new ErrorCalificacion(403, 'Solo podés consultar tu perfil y el de la contraparte de tus viajes entregados.');
     }
-    const perfil = await db.query('SELECT id_usuario, nombre, apellido, rol FROM USUARIO WHERE id_usuario = $1', [idUsuario]);
+    // Email, DNI y alta solo para el perfil propio: el de la contraparte de un
+    // viaje muestra nada más que nombre y rol.
+    const propio = usuario.id === idUsuario;
+    const perfil = await db.query(`SELECT id_usuario, nombre, apellido, rol
+        ${propio ? ', email, dni, creado_en' : ''} FROM USUARIO WHERE id_usuario = $1`, [idUsuario]);
     if (!perfil.rows.length) throw new ErrorCalificacion(404, 'No encontramos el usuario.');
     // Un administrador no recibe calificaciones: nunca es la contraparte
     // calificada, así que ni la reputación ni el historial las muestran.
