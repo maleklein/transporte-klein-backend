@@ -299,6 +299,28 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
             assert.equal(vacio.cuerpo.tasa_cumplimiento, null);
             assert.equal(vacio.cuerpo.hay_datos, false);
 
+            // Entregas deshechas: la carga 3 se entrega, se deshace y se vuelve a
+            // entregar (cuenta una vez, en la semana de la última); la 4 se
+            // entrega y se deshace (no cuenta).
+            await db.query(`INSERT INTO CARGA (id_carga,id_localidad_origen,id_localidad_destino,tipo_carga,peso_kg,fecha,
+                estado_actual,id_admin_creador,id_camionero_asignado,creado_en) VALUES
+                (3,'30000001','82000001','Trigo',1000,'2026-10-10','entregada',1,2,'2026-10-05 09:00'),
+                (4,'30000001','82000001','Arroz',1000,'2026-10-10','en_viaje',1,2,'2026-10-05 09:00')`);
+            await db.query(`INSERT INTO ESTADO_CARGA (id_carga,estado_anterior,estado_nuevo,id_actor,marca_tiempo) VALUES
+                (3,'pendiente','aceptada',1,'2026-10-06 08:00'), (3,'aceptada','en_viaje',1,'2026-10-07 08:00'),
+                (3,'en_viaje','entregada',1,'2026-10-08 08:00'), (3,'entregada','en_viaje',1,'2026-10-09 08:00'),
+                (3,'en_viaje','entregada',1,'2026-10-13 08:00'),
+                (4,'pendiente','aceptada',1,'2026-10-06 08:00'), (4,'aceptada','en_viaje',1,'2026-10-07 08:00'),
+                (4,'en_viaje','entregada',1,'2026-10-08 08:00'), (4,'entregada','en_viaje',1,'2026-10-09 08:00')`);
+            const conDeshechas = (await pedir('/metricas?fecha_desde=2026-10-01&fecha_hasta=2026-10-31', 1)).cuerpo;
+            const porSemana = Object.fromEntries(conDeshechas.entregadas_por_semana.map((s) => [s.semana_inicio, s.cantidad]));
+            assert.equal(porSemana['2026-10-05'], 1);
+            assert.equal(porSemana['2026-10-12'], 1);
+            assert.equal(conDeshechas.entregadas_por_semana.reduce((suma, s) => suma + s.cantidad, 0), 2);
+            assert.equal(conDeshechas.tasa_cumplimiento, 0.67);
+            // Carga 1: 48 h; carga 3: de la aceptación a la última entrega, 168 h.
+            assert.equal(conDeshechas.tiempo_promedio_entrega_horas, 108);
+
             // Sin fechas, toma los últimos 30 días; con una sola, completa la otra.
             const porDefecto = await pedir('/metricas', 1);
             assert.equal(porDefecto.estado, 200);

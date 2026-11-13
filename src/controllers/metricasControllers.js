@@ -51,6 +51,21 @@ const hoyIso = () => new Date().toISOString().slice(0, 10);
  * @param {number|null} numero
  * @returns {number|null} el número redondeado, o null si el valor de entrada era null.
  */
+/**
+ * Entrega vigente de cada carga: la última vez que pasó a `entregada`, y solo
+ * si sigue entregada. Una entrega se puede deshacer (vuelve a `en_viaje`), así
+ * que el historial puede tener más de un paso a `entregada` por carga, o uno
+ * que ya no vale. Contar cada paso sumaba dos veces la carga que se entregó, se
+ * deshizo y se volvió a entregar, y contaba la que quedó sin entregar.
+ */
+const SQL_ENTREGA_VIGENTE = `entrega_vigente AS (
+    SELECT ec.id_carga, MAX(ec.marca_tiempo) AS t_entregada
+    FROM ESTADO_CARGA ec
+    JOIN CARGA c ON c.id_carga = ec.id_carga AND c.estado_actual = 'entregada'
+    WHERE ec.estado_nuevo = 'entregada'
+    GROUP BY ec.id_carga
+)`;
+
 const redondear = (numero) => {
     if (numero === null || numero === undefined) return null;
     return Math.round((Number(numero) + Number.EPSILON) * 100) / 100;
@@ -124,12 +139,12 @@ const resolverPeriodo = (query) => {
  *   tramos cuyo evento final (`aceptada`) cae en el período. `null` si ningún
  *   tramo entra.
  * - `tiempo_promedio_entrega_horas`: promedio, en horas, del tramo desde la
- *   primera vez que cada carga pasó a `aceptada` hasta que pasó a `entregada`
- *   (una sola vez por carga, porque `entregada` es un estado terminal). Sólo
- *   entran los tramos cuyo evento final (`entregada`) cae en el período.
+ *   primera vez que cada carga pasó a `aceptada` hasta su entrega vigente (la
+ *   última, si se deshizo y se volvió a entregar; ver `SQL_ENTREGA_VIGENTE`).
+ *   Sólo entran los tramos cuya entrega vigente cae en el período.
  *   `null` si ninguno entra.
- * - `tasa_cumplimiento`: `entregadas / (entregadas + canceladas)`, contando
- *   las transiciones a esos estados que caen en el período. `null` —no
+ * - `tasa_cumplimiento`: `entregadas / (entregadas + canceladas)`: las
+ *   entregas vigentes y las cancelaciones que caen en el período. `null` —no
  *   `0`— si no hubo ninguna de las dos: significa "sin datos", no "0% de
  *   cumplimiento".
  * - `camioneros_con_viaje`: cantidad de camioneros distintos entre las cargas
@@ -138,7 +153,7 @@ const resolverPeriodo = (query) => {
  *   columna todavía (depende de la asignación de HU 6).
  * - `entregadas_por_semana`: una fila por cada semana (lunes a lunes) del
  *   período, incluidas las que tuvieron 0 entregas, con la cantidad de
- *   transiciones a `entregada` que cayeron en esa semana y en el período.
+ *   entregas vigentes que cayeron en esa semana y en el período.
  * - `hay_datos`: `false` únicamente cuando no hubo ninguna carga creada en el
  *   período NI ninguna transición registrada en el período. En ese caso los
  *   promedios y la tasa son `null`, los conteos son 0, pero la respuesta
@@ -212,8 +227,7 @@ const obtenerMetricas = async (req, res) => {
             ),
 
             // Tiempo de entrega: primera 'aceptada' de cada carga hasta su
-            // 'entregada' (una sola, porque es un estado terminal). Sólo cuentan
-            // los tramos cuya 'entregada' cae en el período.
+            // entrega vigente. Sólo cuentan los tramos cuya entrega cae en el período.
             pool.query(
                 `WITH primera_aceptada AS (
                      SELECT id_carga, MIN(marca_tiempo) AS t_aceptada
@@ -221,28 +235,27 @@ const obtenerMetricas = async (req, res) => {
                      WHERE estado_nuevo = 'aceptada'
                      GROUP BY id_carga
                  ),
-                 entrega AS (
-                     SELECT id_carga, MIN(marca_tiempo) AS t_entregada
-                     FROM ESTADO_CARGA
-                     WHERE estado_nuevo = 'entregada'
-                     GROUP BY id_carga
-                 )
+                 ${SQL_ENTREGA_VIGENTE}
                  SELECT AVG(EXTRACT(EPOCH FROM (e.t_entregada - pa.t_aceptada)) / 3600.0) AS horas
                  FROM primera_aceptada pa
-                 JOIN entrega e ON e.id_carga = pa.id_carga
+                 JOIN entrega_vigente e ON e.id_carga = pa.id_carga
                  WHERE e.t_entregada >= $1::date AND e.t_entregada < $2::date`,
                 [fechaDesde, fechaHastaExclusiva]
             ),
 
             // Entregadas y canceladas del período, para la tasa de cumplimiento.
-            // Los dos estados son terminales, así que cada carga aporta a lo
-            // sumo una fila: no hace falta de-duplicar por carga.
+            // Las entregas, una por carga (la vigente); la cancelación es
+            // terminal, así que cada carga aporta a lo sumo una.
             pool.query(
-                `SELECT estado_nuevo, COUNT(*)::int AS cantidad
+                `WITH ${SQL_ENTREGA_VIGENTE}
+                 SELECT 'entregada' AS estado_nuevo, COUNT(*)::int AS cantidad
+                 FROM entrega_vigente
+                 WHERE t_entregada >= $1::date AND t_entregada < $2::date
+                 UNION ALL
+                 SELECT 'cancelada', COUNT(*)::int
                  FROM ESTADO_CARGA
-                 WHERE estado_nuevo IN ('entregada', 'cancelada')
-                   AND marca_tiempo >= $1::date AND marca_tiempo < $2::date
-                 GROUP BY estado_nuevo`,
+                 WHERE estado_nuevo = 'cancelada'
+                   AND marca_tiempo >= $1::date AND marca_tiempo < $2::date`,
                 [fechaDesde, fechaHastaExclusiva]
             ),
 
@@ -274,12 +287,12 @@ const obtenerMetricas = async (req, res) => {
                          interval '1 week'
                      ) AS semana_inicio
                  ),
+                 ${SQL_ENTREGA_VIGENTE},
                  entregas AS (
-                     SELECT date_trunc('week', marca_tiempo) AS semana_inicio, COUNT(*)::int AS cantidad
-                     FROM ESTADO_CARGA
-                     WHERE estado_nuevo = 'entregada'
-                       AND marca_tiempo >= $1::date AND marca_tiempo < $2::date
-                     GROUP BY date_trunc('week', marca_tiempo)
+                     SELECT date_trunc('week', t_entregada) AS semana_inicio, COUNT(*)::int AS cantidad
+                     FROM entrega_vigente
+                     WHERE t_entregada >= $1::date AND t_entregada < $2::date
+                     GROUP BY date_trunc('week', t_entregada)
                  )
                  SELECT TO_CHAR(s.semana_inicio, 'YYYY-MM-DD') AS semana_inicio,
                         COALESCE(e.cantidad, 0) AS cantidad
