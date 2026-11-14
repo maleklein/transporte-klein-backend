@@ -15,11 +15,14 @@ El proyecto tiene tres documentos que tienen que coincidir con el código:
 | Documento | Dónde está |
 |---|---|
 | SRS (`SRS_Transporte_Klein.docx`) | [OneDrive de Milena](https://uapeduar-my.sharepoint.com/:w:/r/personal/milena_seri_uap_edu_ar/_layouts/15/Doc.aspx?sourcedoc=%7BCD7049A0-1983-4EBD-B312-0BD4A8DC5CB6%7D&file=SRS_Transporte_Klein.docx&action=default) |
-| Manual de usuario (`Manual_de_Usuario_Transporte_Klein.docx`) | [Drive de Gianna](https://docs.google.com/document/d/1Bi-bGt3aQe49anbhF4TWqDN51H_GM5yM/edit) |
-| Banco de pruebas (`Bancos_de_Prueba_Transporte_Klein.docx`) | [Drive de Gianna](https://docs.google.com/document/d/14ZyBpCDsu3TXOB1qMSUldf-dgRwJxVDW/edit) |
+| Manual de usuario (`Manual_de_Usuario_Transporte_Klein.docx`) | [OneDrive de Milena](https://uapeduar-my.sharepoint.com/:w:/r/personal/milena_seri_uap_edu_ar/_layouts/15/Doc.aspx?sourcedoc=%7B996E28F0-50D9-4D60-BA17-019CCDABFF0B%7D&file=Manual_de_Usuario_Transporte_Klein.docx&action=default) |
+| Banco de pruebas (`Bancos_de_Prueba_Transporte_Klein.docx`) | [OneDrive de Milena](https://uapeduar-my.sharepoint.com/:w:/r/personal/milena_seri_uap_edu_ar/_layouts/15/Doc.aspx?sourcedoc=%7B63EAF476-3BBE-4F98-8CDF-5DA8F9D43EBA%7D&file=Bancos_de_Prueba_Transporte_Klein.docx&action=default) |
 
-Los tres son archivos Word. Si no podés abrir los links, pedíselos a quien te
-está usando.
+Los tres son archivos Word y están en la misma carpeta de OneDrive (Proyecto).
+Se editan con Word, de escritorio o web, y no con Google Docs: Docs cambia las
+fuentes y agrega formato a mano. Las copias viejas del manual y del banco en el
+Drive de Gianna quedaron congeladas el 13/11/2026 y no se actualizan más. Si no
+podés abrir los links, pedíselos a quien te está usando.
 
 ### Al hacer un cambio en el código
 
@@ -55,9 +58,11 @@ gh pr list -R maleklein/transporte-klein-frontend --state merged --label documen
   documento. Si parece un error del código, avisá en lugar de "arreglar" el
   documento.
 - Editá sin control de cambios y guardá una copia del archivo anterior.
-- En Drive, subí el archivo como versión nueva del mismo documento
-  (Administrar versiones), no como archivo aparte: el link tiene que seguir
-  siendo el mismo.
+- Subí el archivo sobre el mismo documento de OneDrive (desde OneDrive web, o
+  por la API de SharePoint con `overwrite=true`), no como archivo aparte: el
+  link tiene que seguir siendo el mismo. No confíes en la sincronización de
+  OneDrive de la computadora: verificá el contenido en la nube. Si da 423, alguien
+  lo tiene abierto en Word web.
 - Cuidá que los tres documentos digan lo mismo entre sí: un mensaje que cambia
   en el manual cambia también en el banco y, si corresponde, en el SRS.
 - Al terminar, sacá la etiqueta de los PRs que pasaste:
