@@ -153,6 +153,44 @@ test('Cargas: fecha de retiro, dirección, capacidad y avisos', {
             const cancelada = (await avisos(4, idCarga)).find((aviso) => aviso.tipo_evento === 'carga_cancelada');
             assert.equal(cancelada.contenido, 'Se canceló la carga Paraná, Entre Ríos → Otra localidad, Entre Ríos a la que te habías postulado.');
         });
+
+        await t.test('notificaciones de a partes: limite y antes_de, sin repetir ni saltear', async () => {
+            // 25 avisos al camionero 5; varios comparten creado_en, como los de
+            // una misma transacción, para probar el desempate por id.
+            await db.query('DELETE FROM NOTIFICACION WHERE id_usuario = 5');
+            for (let i = 0; i < 25; i += 1) {
+                await db.query(
+                    `INSERT INTO NOTIFICACION (id_usuario, tipo_evento, contenido, leida, creado_en)
+                     VALUES (5, 'carga_nueva', $1, false, TIMESTAMP '2026-11-01 10:00' + ($2 * INTERVAL '1 minute'))`,
+                    [`Aviso ${i}`, Math.floor(i / 3)],
+                );
+            }
+            const todas = (await pedir('/notificaciones', 5)).cuerpo.map((aviso) => aviso.id_notificacion);
+            assert.equal(todas.length, 25, 'sin limite, como antes: hasta 100');
+
+            const leidas = [];
+            let antesDe;
+            for (const esperadas of [10, 10, 5]) {
+                const ruta = `/notificaciones?limite=10${antesDe ? `&antes_de=${antesDe}` : ''}`;
+                const pagina = await pedir(ruta, 5);
+                assert.equal(pagina.estado, 200);
+                assert.equal(pagina.cuerpo.length, esperadas);
+                leidas.push(...pagina.cuerpo.map((aviso) => aviso.id_notificacion));
+                antesDe = leidas.at(-1);
+            }
+            assert.deepEqual(leidas, todas, 'las páginas juntas son la lista completa, en el mismo orden');
+            assert.equal((await pedir(`/notificaciones?limite=10&antes_de=${antesDe}`, 5)).cuerpo.length, 0);
+
+            // El id de un aviso de otro usuario no sirve de punto de partida.
+            const ajena = (await db.query('SELECT id_notificacion FROM NOTIFICACION WHERE id_usuario <> 5 LIMIT 1')).rows[0];
+            if (ajena) {
+                assert.deepEqual((await pedir(`/notificaciones?antes_de=${ajena.id_notificacion}`, 5)).cuerpo, []);
+            }
+
+            for (const consulta of ['limite=0', 'limite=101', 'limite=abc', 'antes_de=-1', 'antes_de=x']) {
+                assert.equal((await pedir(`/notificaciones?${consulta}`, 5)).estado, 400, consulta);
+            }
+        });
     } finally {
         if (servidor) await new Promise((resolve) => servidor.close(resolve));
         await db.end();

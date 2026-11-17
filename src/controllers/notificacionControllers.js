@@ -20,6 +20,17 @@ const pool = require('../db');
 const MAXIMO_NOTIFICACIONES = 100;
 
 /**
+ * Interpreta un query param que tiene que ser un entero positivo.
+ * @param {*} valor - lo que llegó en `req.query`.
+ * @returns {number|undefined|null} el número; undefined si no vino; null si no es válido.
+ */
+const leerEnteroPositivo = (valor) => {
+    if (valor === undefined) return undefined;
+    const numero = Number(valor);
+    return Number.isInteger(numero) && numero > 0 ? numero : null;
+};
+
+/**
  * Interpreta el query param `solo_no_leidas`.
  *
  * @param {*} valor - lo que llegó en `req.query.solo_no_leidas`.
@@ -42,10 +53,19 @@ const leerSoloNoLeidas = (valor) => {
  * es lo que usa el contador de la barra superior. Devuelve como mucho
  * `MAXIMO_NOTIFICACIONES`.
  *
- * Respuestas: 200 con el array (vacío si no tiene ninguna) · 400 si
- * `solo_no_leidas` no es true ni false · 500 ante un error inesperado.
+ * Paginación (corrección del profesor del 17/11, punto 6): `limite` dice
+ * cuántas traer (de 1 a `MAXIMO_NOTIFICACIONES`) y `antes_de` es el id de la
+ * última que ya se tiene, para traer las siguientes, más viejas. Se pagina por
+ * posición (fecha y id) y no por número de página: si llega un aviso nuevo
+ * mientras se lee la lista, la página siguiente no repite ni saltea ninguno.
+ * Sin `limite` responde igual que antes, para el contador.
  *
- * @param {import('express').Request} req - request de Express. Query param opcional: solo_no_leidas.
+ * Respuestas: 200 con el array (vacío si no tiene ninguna o no quedan más) ·
+ * 400 si `solo_no_leidas` no es true ni false, o si `limite` o `antes_de` no
+ * son enteros positivos (o `limite` pasa del máximo) · 500 ante un error
+ * inesperado.
+ *
+ * @param {import('express').Request} req - request de Express. Query params opcionales: solo_no_leidas, limite, antes_de.
  * @param {import('express').Response} res - response de Express.
  * @returns {Promise<void>}
  */
@@ -55,17 +75,31 @@ const listarNotificaciones = async (req, res) => {
         return res.status(400).json({ message: "El filtro 'solo_no_leidas' debe ser 'true' o 'false'" });
     }
 
+    const limite = leerEnteroPositivo(req.query.limite);
+    if (limite === null || limite > MAXIMO_NOTIFICACIONES) {
+        return res.status(400).json({ message: `'limite' debe ser un número entre 1 y ${MAXIMO_NOTIFICACIONES}` });
+    }
+    const antesDe = leerEnteroPositivo(req.query.antes_de);
+    if (antesDe === null) {
+        return res.status(400).json({ message: "'antes_de' debe ser el id de una notificación" });
+    }
+
     try {
         const resultado = await pool.query(
             `SELECT id_notificacion, tipo_evento, contenido, id_carga, leida, creado_en
              FROM NOTIFICACION
              WHERE id_usuario = $1
                AND ($2 = false OR leida = false)
+               -- Las más viejas que la última que ya se tiene. Si ese id no es
+               -- del usuario, la subconsulta no encuentra nada y no devuelve ninguna.
+               AND ($4::int IS NULL OR (creado_en, id_notificacion) < (
+                   SELECT creado_en, id_notificacion FROM NOTIFICACION
+                   WHERE id_notificacion = $4 AND id_usuario = $1))
              -- El id desempata los avisos de una misma transacción, que
              -- comparten creado_en: sin él, su orden cambiaría entre pedidos.
              ORDER BY creado_en DESC, id_notificacion DESC
              LIMIT $3`,
-            [req.usuario.id, soloNoLeidas, MAXIMO_NOTIFICACIONES]
+            [req.usuario.id, soloNoLeidas, limite ?? MAXIMO_NOTIFICACIONES, antesDe ?? null]
         );
 
         return res.status(200).json(resultado.rows);

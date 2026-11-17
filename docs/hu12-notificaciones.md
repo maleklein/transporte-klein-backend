@@ -25,7 +25,7 @@ El de asignación lo dispara `POST /cargas/:id/asignar`, con
 
 | Endpoint | Qué hace |
 |---|---|
-| `GET /notificaciones` | Las del usuario del token, la más nueva primero (100 como máximo). Con `?solo_no_leidas=true`, sólo las que faltan leer. |
+| `GET /notificaciones` | Las del usuario del token, la más nueva primero (100 como máximo). Con `?solo_no_leidas=true`, sólo las que faltan leer. Para traerlas de a partes: `?limite=20` (de 1 a 100) y, para las siguientes, `&antes_de=<id de la última que ya se tiene>`; 400 si alguno no es un entero positivo. |
 | `PUT /notificaciones/:id/leida` | Marca una como leída. Si es de otro usuario responde 404, igual que si no existiera. |
 | `PUT /notificaciones/leidas` | Marca como leídas todas las del usuario que faltaban leer. Responde `{ marcadas }`. |
 
