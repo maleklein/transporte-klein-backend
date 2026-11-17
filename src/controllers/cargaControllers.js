@@ -317,6 +317,11 @@ const crearCarga = async (req, res) => {
  * Al camionero no le muestra las que tienen el retiro vencido, y le agrega a
  * cada una `capacidad_camionero_kg` (ver `capacidadDelCamionero`).
  *
+ * Al administrador le agrega `cantidad_postulados`: cuántos camioneros están
+ * esperando que les asigne la carga (postulaciones en `pendiente`). Con eso las
+ * tarjetas de las cargas pendientes dicen "3 postulados" sin abrir cada una.
+ * Al camionero no se le manda: cuántos compiten por una carga no es dato suyo.
+ *
  * Respuestas: 200 con el array de cargas · 400 si `fecha` tiene formato inválido ·
  * 500 ante un error inesperado.
  *
@@ -371,7 +376,9 @@ const listarCargas = async (req, res) => {
                     -- un Date de JS corrido por la zona horaria local.
                     TO_CHAR(c.fecha, 'YYYY-MM-DD') AS fecha,
                     c.observaciones,
-                    c.estado_actual,${COLUMNAS_DISTANCIA}
+                    c.estado_actual,${COLUMNAS_DISTANCIA},
+                    (SELECT COUNT(*)::int FROM POSTULACION p
+                     WHERE p.id_carga = c.id_carga AND p.estado = 'pendiente') AS cantidad_postulados
              FROM CARGA c${JOIN_UBICACION}
              WHERE ($1::text[] IS NULL OR c.estado_actual = ANY($1::text[]))
                AND ($2 = '' OR c.fecha = $2::date)
@@ -384,7 +391,10 @@ const listarCargas = async (req, res) => {
 
         if (esCamionero) {
             const capacidad = await capacidadDelCamionero(req.usuario.id);
-            for (const carga of resultado.rows) carga.capacidad_camionero_kg = capacidad;
+            for (const carga of resultado.rows) {
+                carga.capacidad_camionero_kg = capacidad;
+                delete carga.cantidad_postulados;
+            }
         }
 
         return res.status(200).json(resultado.rows);

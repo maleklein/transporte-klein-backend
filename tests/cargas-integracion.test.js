@@ -154,6 +154,27 @@ test('Cargas: fecha de retiro, dirección, capacidad y avisos', {
             assert.equal(cancelada.contenido, 'Se canceló la carga Paraná, Entre Ríos → Otra localidad, Entre Ríos a la que te habías postulado.');
         });
 
+        await t.test('el listado le dice al administrador cuántos postulados esperan, y al camionero no', async () => {
+            const carga = await pedir('/cargas', 1, { method: 'POST', body: nueva({ tipo_carga: 'Con postulados', peso: 900 }) });
+            assert.equal(carga.estado, 201);
+            const id = carga.cuerpo.id_carga;
+            const delAdmin = async () => (await pedir('/cargas', 1)).cuerpo.find((item) => item.id_carga === id);
+            assert.equal((await delAdmin()).cantidad_postulados, 0);
+
+            for (const camionero of [2, 4]) {
+                assert.equal((await pedir(`/cargas/${id}/postulaciones`, camionero, { method: 'POST' })).estado, 201);
+            }
+            assert.equal((await delAdmin()).cantidad_postulados, 2);
+
+            const delCamionero = (await pedir('/cargas', 5)).cuerpo.find((item) => item.id_carga === id);
+            assert.ok(delCamionero, 'el camionero también la ve');
+            assert.equal('cantidad_postulados' in delCamionero, false);
+
+            // Al asignarla, los postulados dejan de esperar.
+            assert.equal((await pedir(`/cargas/${id}/asignar`, 1, { method: 'POST', body: { id_camionero: 4 } })).estado, 200);
+            assert.equal((await delAdmin()).cantidad_postulados, 0);
+        });
+
         await t.test('notificaciones de a partes: limite y antes_de, sin repetir ni saltear', async () => {
             // 25 avisos al camionero 5; varios comparten creado_en, como los de
             // una misma transacción, para probar el desempate por id.
