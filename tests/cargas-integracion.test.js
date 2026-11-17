@@ -175,6 +175,27 @@ test('Cargas: fecha de retiro, dirección, capacidad y avisos', {
             assert.equal((await delAdmin()).cantidad_postulados, 0);
         });
 
+        await t.test('filtro por fecha de creación: mismo período que las métricas, los dos días incluidos', async () => {
+            const alta = await pedir('/cargas', 1, { method: 'POST', body: nueva({ tipo_carga: 'Creada en octubre' }) });
+            assert.equal(alta.estado, 201);
+            const id = alta.cuerpo.id_carga;
+            await db.query("UPDATE CARGA SET creado_en = TIMESTAMP '2026-10-31 23:59:59' WHERE id_carga = $1", [id]);
+            const ids = async (consulta) => (await pedir(`/cargas?${consulta}`, 1)).cuerpo.map((carga) => carga.id_carga);
+
+            assert.ok((await ids('creada_desde=2026-10-31&creada_hasta=2026-10-31')).includes(id), 'el último día entra entero');
+            assert.ok(!(await ids('creada_desde=2026-11-01')).includes(id));
+            assert.ok(!(await ids('creada_hasta=2026-10-30')).includes(id));
+            assert.deepEqual(await ids('creada_desde=2026-10-01&creada_hasta=2026-10-31&estado=disponible'), [id]);
+
+            // El mismo número que las métricas para ese período.
+            const metricas = await pedir('/metricas?fecha_desde=2026-10-01&fecha_hasta=2026-10-31', 1);
+            assert.equal(metricas.cuerpo.cargas_por_estado.disponible, 1);
+
+            for (const consulta of ['creada_desde=31-10-2026', 'creada_hasta=ayer', 'creada_desde=2026-11-02&creada_hasta=2026-11-01']) {
+                assert.equal((await pedir(`/cargas?${consulta}`, 1)).estado, 400, consulta);
+            }
+        });
+
         await t.test('notificaciones de a partes: limite y antes_de, sin repetir ni saltear', async () => {
             // 25 avisos al camionero 5; varios comparten creado_en, como los de
             // una misma transacción, para probar el desempate por id.
