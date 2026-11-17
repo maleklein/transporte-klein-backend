@@ -298,6 +298,10 @@ const crearCarga = async (req, res) => {
  * - `fecha`: comparación exacta contra la columna DATE (formato AAAA-MM-DD).
  * - `destino_provincia`: id de provincia (2 dígitos), comparación exacta.
  * - `destino_localidad`: id de localidad (8 dígitos), comparación exacta.
+ * - `creada_desde` / `creada_hasta` (AAAA-MM-DD): cargas
+ *   creadas en ese período, los dos días incluidos. Es el mismo criterio que
+ *   `cargas_por_estado` de las métricas (HU 13), así los números del panel del
+ *   administrador coinciden con el listado al que llevan.
  *
  * Los dos filtros de destino reemplazan al viejo `destino`, que era una
  * coincidencia parcial sobre texto libre (ILIKE). Además de no encontrar lo
@@ -322,15 +326,19 @@ const crearCarga = async (req, res) => {
  * tarjetas de las cargas pendientes dicen "3 postulados" sin abrir cada una.
  * Al camionero no se le manda: cuántos compiten por una carga no es dato suyo.
  *
- * Respuestas: 200 con el array de cargas · 400 si `fecha` tiene formato inválido ·
- * 500 ante un error inesperado.
+ * Respuestas: 200 con el array de cargas · 400 si `fecha`, `creada_desde` o
+ * `creada_hasta` tienen formato inválido, o si `creada_desde` es posterior a
+ * `creada_hasta` · 500 ante un error inesperado.
  *
- * @param {import('express').Request} req - request de Express. Query params opcionales: estado, fecha, destino_provincia, destino_localidad.
+ * @param {import('express').Request} req - request de Express. Query params opcionales: estado, fecha, destino_provincia, destino_localidad, creada_desde, creada_hasta.
  * @param {import('express').Response} res - response de Express.
  * @returns {Promise<void>}
  */
 const listarCargas = async (req, res) => {
-    const { estado, fecha, destino_provincia: destinoProvincia, destino_localidad: destinoLocalidad } = req.query;
+    const {
+        estado, fecha, destino_provincia: destinoProvincia, destino_localidad: destinoLocalidad,
+        creada_desde: creadaDesde, creada_hasta: creadaHasta,
+    } = req.query;
 
     const filtroFecha = fecha ? String(fecha).trim() : '';
     if (filtroFecha !== '' && !esFechaValida(filtroFecha)) {
@@ -345,6 +353,20 @@ const listarCargas = async (req, res) => {
     const filtroLocalidad = destinoLocalidad ? String(destinoLocalidad).trim() : '';
     if (filtroLocalidad !== '' && !/^\d{8}$/.test(filtroLocalidad)) {
         return res.status(400).json({ message: "El filtro 'destino_localidad' debe ser un id de localidad válido" });
+    }
+
+    const filtroCreadaDesde = creadaDesde ? String(creadaDesde).trim() : '';
+    if (filtroCreadaDesde !== '' && !esFechaValida(filtroCreadaDesde)) {
+        return res.status(400).json({ message: "El filtro 'creada_desde' debe tener formato AAAA-MM-DD" });
+    }
+
+    const filtroCreadaHasta = creadaHasta ? String(creadaHasta).trim() : '';
+    if (filtroCreadaHasta !== '' && !esFechaValida(filtroCreadaHasta)) {
+        return res.status(400).json({ message: "El filtro 'creada_hasta' debe tener formato AAAA-MM-DD" });
+    }
+
+    if (filtroCreadaDesde !== '' && filtroCreadaHasta !== '' && filtroCreadaDesde > filtroCreadaHasta) {
+        return res.status(400).json({ message: "'creada_desde' no puede ser posterior a 'creada_hasta'" });
     }
 
     const filtroEstado = estado ? String(estado).trim() : '';
@@ -385,8 +407,12 @@ const listarCargas = async (req, res) => {
                AND ($3 = '' OR pd.id_provincia = $3)
                AND ($4 = '' OR c.id_localidad_destino = $4)
                AND ($5::date IS NULL OR c.fecha >= $5::date)
+               -- Igual que las métricas: desde el primer día hasta el último inclusive.
+               AND ($6 = '' OR c.creado_en >= $6::date)
+               AND ($7 = '' OR c.creado_en < $7::date + 1)
              ORDER BY c.fecha, c.id_carga`,
-            [estadosVisibles, filtroFecha, filtroProvincia, filtroLocalidad, retiroDesde]
+            [estadosVisibles, filtroFecha, filtroProvincia, filtroLocalidad, retiroDesde,
+                filtroCreadaDesde, filtroCreadaHasta]
         );
 
         if (esCamionero) {
