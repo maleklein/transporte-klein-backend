@@ -12,7 +12,10 @@ eso es lo que ve el camionero en el listado:
 De pendiente a aceptada no se pasa con `PATCH /cargas/:id/estado`: se llega
 asignando, porque si no quedaría un viaje confirmado sin camionero. Volver de
 aceptada a pendiente sí se puede, y deshace la asignación: la carga se queda sin
-camionero y todas sus postulaciones vuelven a `pendiente`.
+camionero y todas sus postulaciones vuelven a `pendiente`. Si la carga no tiene
+ninguna postulación (las que se aceptaron a mano antes de que existiera la
+asignación), vuelve a `disponible`: pendiente quiere decir que hay postulados
+esperando, y no habría a quién asignársela.
 
 | Endpoint | Rol | Qué hace |
 |---|---|---|

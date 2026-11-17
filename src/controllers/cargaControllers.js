@@ -702,6 +702,9 @@ const actualizarCarga = async (req, res) => {
  * - Volver de "aceptada" a "pendiente" deshace la asignación: la carga se
  *   queda sin camionero y todas sus postulaciones vuelven a pendiente, para
  *   poder asignarla de nuevo. El camionero que la tenía recibe el aviso.
+ *   Si la carga no tiene ninguna postulación (datos cargados antes de que
+ *   existiera la asignación), vuelve a "disponible": pendiente quiere decir
+ *   que hay postulados esperando, y no habría a quién asignársela.
  *
  * Respuestas: 200 con la carga actualizada · 400 si el id o el estado pedido
  * no son válidos · 404 si no existe la carga · 409 si la transición no está
@@ -784,6 +787,19 @@ const cambiarEstadoCarga = async (req, res) => {
             });
         }
 
+        // Pendiente es "hay camioneros postulados esperando la asignación".
+        // Una carga aceptada siempre tiene la postulación de su camionero,
+        // salvo las que se aceptaron a mano antes de la HU 6: esas vuelven a
+        // disponible, para que puedan recibir postulaciones de nuevo.
+        let estadoFinal = estadoNuevo;
+        if (estadoActual === ESTADOS.ACEPTADA && estadoNuevo === ESTADOS.PENDIENTE) {
+            const postulaciones = await client.query(
+                'SELECT 1 FROM POSTULACION WHERE id_carga = $1 LIMIT 1',
+                [idCarga]
+            );
+            if (postulaciones.rows.length === 0) estadoFinal = ESTADOS.DISPONIBLE;
+        }
+
         // El CTE no es opcional acá: la pantalla de detalle se redibuja con lo
         // que devuelve este endpoint, así que si le faltaran los JOIN al
         // catálogo se quedaría sin la ruta después de cada cambio de estado.
@@ -801,10 +817,10 @@ const cambiarEstadoCarga = async (req, res) => {
                     c.observaciones, c.estado_actual,${COLUMNAS_DISTANCIA},${COLUMNAS_COSTOS},
                     c.id_admin_creador, c.creado_en, c.actualizado_en
              FROM modificada c${JOIN_UBICACION}`,
-            [estadoNuevo, idCarga]
+            [estadoFinal, idCarga]
         );
 
-        await registrarCambioEstado(idCarga, estadoActual, estadoNuevo, req.usuario.id, client);
+        await registrarCambioEstado(idCarga, estadoActual, estadoFinal, req.usuario.id, client);
 
         // Deshacer la asignación va después de la bitácora a propósito: así el
         // camionero todavía figura como parte de la carga y le llega el aviso

@@ -154,6 +154,32 @@ test('Cargas: fecha de retiro, dirección, capacidad y avisos', {
             assert.equal(cancelada.contenido, 'Se canceló la carga Paraná, Entre Ríos → Otra localidad, Entre Ríos a la que te habías postulado.');
         });
 
+        await t.test('volver de aceptada a pendiente: sin postulados, la carga queda disponible', async () => {
+            // 201 se aceptó a mano antes de la asignación (HU 6): no tiene
+            // postulaciones. 202 se asignó al camionero 4, que se había postulado.
+            await db.query(`INSERT INTO CARGA (id_carga,id_localidad_origen,id_localidad_destino,tipo_carga,peso_kg,fecha,estado_actual,id_admin_creador,id_camionero_asignado)
+                VALUES (201,'30000001','30000002','Sin postulados',500,'2099-01-01','aceptada',1,NULL),
+                       (202,'30000001','30000002','Asignada',500,'2099-01-01','aceptada',1,4)`);
+            await db.query("INSERT INTO POSTULACION (id_carga,id_camionero,estado) VALUES (202,4,'aceptada')");
+
+            const sinPostulados = await pedir('/cargas/201/estado', 1, { method: 'PATCH', body: { estado: 'pendiente' } });
+            assert.equal(sinPostulados.estado, 200);
+            assert.equal(sinPostulados.cuerpo.estado_actual, 'disponible');
+            const bitacora = await db.query(
+                'SELECT estado_anterior, estado_nuevo FROM ESTADO_CARGA WHERE id_carga = 201 ORDER BY id_estado_carga DESC LIMIT 1');
+            assert.deepEqual(bitacora.rows[0], { estado_anterior: 'aceptada', estado_nuevo: 'disponible' });
+
+            const conPostulado = await pedir('/cargas/202/estado', 1, { method: 'PATCH', body: { estado: 'pendiente' } });
+            assert.equal(conPostulado.estado, 200);
+            assert.equal(conPostulado.cuerpo.estado_actual, 'pendiente');
+            const carga = (await db.query('SELECT id_camionero_asignado FROM CARGA WHERE id_carga = 202')).rows[0];
+            assert.equal(carga.id_camionero_asignado, null);
+            const postulacion = (await db.query('SELECT estado FROM POSTULACION WHERE id_carga = 202')).rows[0];
+            assert.equal(postulacion.estado, 'pendiente');
+            const aviso = (await avisos(4, 202)).find((item) => item.tipo_evento === 'cambio_estado');
+            assert.ok(aviso, 'al camionero que la tenía le llega el aviso');
+        });
+
         await t.test('notificaciones de a partes: limite y antes_de, sin repetir ni saltear', async () => {
             // 25 avisos al camionero 5; varios comparten creado_en, como los de
             // una misma transacción, para probar el desempate por id.
