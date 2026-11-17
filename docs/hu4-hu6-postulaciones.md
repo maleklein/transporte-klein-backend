@@ -32,3 +32,9 @@ retiro no puede ser anterior a hoy"); la edición sólo si la fecha cambió.
 `capacidad_camionero_kg` (null si no la tiene cargada), para que la pantalla no
 le ofrezca postularse a una carga que pesa más de lo que lleva su vehículo. La
 regla la sigue aplicando `POST /cargas/:id/postulaciones`.
+
+**Postulados en el listado.** `GET /cargas` le agrega al administrador
+`cantidad_postulados`: cuántas postulaciones de la carga están en `pendiente`,
+es decir, cuántos camioneros esperan la asignación. Las tarjetas de Gestión de
+Cargas lo muestran en las pendientes ("3 postulados"). Al camionero no se le
+manda.
