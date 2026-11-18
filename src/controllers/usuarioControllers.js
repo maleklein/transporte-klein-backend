@@ -505,6 +505,58 @@ const actualizarUsuario = async (req, res) => {
     }
 };
 
+/** Columnas de un usuario, con las de CAMIONERO, para el listado y la ficha. */
+const COLUMNAS_USUARIO = `u.id_usuario, u.nombre, u.apellido, u.dni, u.email, u.rol, u.estado, u.creado_en, u.actualizado_en,
+                    c.ubicacion, c.disponibilidad, c.tipo_vehiculo, c.capacidad_kg`;
+
+/**
+ * Arma un usuario a partir de una fila de USUARIO con LEFT JOIN a CAMIONERO:
+ * los datos del vehículo van en `camionero`, y solo si el rol es camionero.
+ * Así el listado y la ficha devuelven lo mismo.
+ *
+ * @param {object} fila
+ * @returns {object}
+ */
+const armarUsuario = (fila) => {
+    const { ubicacion, disponibilidad, tipo_vehiculo, capacidad_kg, ...usuario } = fila;
+    const camionero = usuario.rol === 'camionero' ? { ubicacion, disponibilidad, tipo_vehiculo, capacidad_kg } : null;
+    return { ...usuario, ...(camionero && { camionero }) };
+};
+
+/**
+ * Controlador de GET /usuarios/:id: un usuario, con los mismos datos que trae
+ * cada fila del listado. Lo usa la ficha del usuario, que así se puede abrir
+ * con su propia dirección y siempre muestra lo que hay en la base.
+ *
+ * @param {import('express').Request} req - Params: id.
+ * @param {import('express').Response} res
+ * @returns {Promise<import('express').Response>} 200 con el usuario, 400 si el id no es numérico,
+ *   404 si no existe, 500 ante error inesperado.
+ */
+const obtenerUsuario = async (req, res) => {
+    const idUsuario = Number(req.params.id);
+    if (!Number.isInteger(idUsuario)) {
+        return res.status(400).json({ message: "El parámetro 'id' debe ser numérico" });
+    }
+
+    try {
+        const resultado = await pool.query(
+            `SELECT ${COLUMNAS_USUARIO}
+             FROM USUARIO u
+             LEFT JOIN CAMIONERO c ON c.id_usuario = u.id_usuario
+             WHERE u.id_usuario = $1`,
+            [idUsuario]
+        );
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({ message: 'Usuario no encontrado' });
+        }
+        return res.status(200).json(armarUsuario(resultado.rows[0]));
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+};
+
 /**
  * Controlador de GET /usuarios: lista usuarios, con filtros opcionales y
  * combinables por nombre, dni, rol y estado (todos vía query string).
@@ -533,8 +585,7 @@ const listarUsuarios = async (req, res) => {
     try {
         // LEFT JOIN con CAMIONERO: si el usuario es administrador, esas columnas vienen todas en null
         const resultado = await pool.query(
-            `SELECT u.id_usuario, u.nombre, u.apellido, u.dni, u.email, u.rol, u.estado, u.creado_en, u.actualizado_en,
-                    c.ubicacion, c.disponibilidad, c.tipo_vehiculo, c.capacidad_kg
+            `SELECT ${COLUMNAS_USUARIO}
              FROM USUARIO u
              LEFT JOIN CAMIONERO c ON c.id_usuario = u.id_usuario
              WHERE ($1 = '' OR u.nombre ILIKE $1)
@@ -545,17 +596,11 @@ const listarUsuarios = async (req, res) => {
             [filtroNombre, filtroDni, filtroRol, filtroEstado]
         );
 
-        const usuarios = resultado.rows.map(fila => {
-            const { ubicacion, disponibilidad, tipo_vehiculo, capacidad_kg, ...usuario } = fila;
-            const camionero = usuario.rol === 'camionero' ? { ubicacion, disponibilidad, tipo_vehiculo, capacidad_kg } : null;
-            return { ...usuario, ...(camionero && { camionero }) };
-        });
-
-        return res.status(200).json(usuarios);
+        return res.status(200).json(resultado.rows.map(armarUsuario));
     } catch (error) {
         console.error(error);
         return res.status(500).json({ message: 'Error interno del servidor' });
     }
 };
 
-module.exports = { crearUsuario, actualizarUsuario, listarUsuarios };
+module.exports = { crearUsuario, actualizarUsuario, listarUsuarios, obtenerUsuario };
