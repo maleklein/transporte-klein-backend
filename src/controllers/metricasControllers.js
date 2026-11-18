@@ -72,7 +72,28 @@ const redondear = (numero) => {
 };
 
 /**
+ * Primer día con movimientos en el sistema: la fecha más vieja entre el alta
+ * de una carga y un cambio de estado. Es el comienzo de "todo el historial"
+ * (`periodo=todo`): arrancar desde una fecha fija muy vieja armaría la serie
+ * de entregas por semana con cientos de semanas vacías.
+ *
+ * @returns {Promise<string|null>} la fecha AAAA-MM-DD, o null si todavía no hay ninguna carga.
+ */
+const primerDiaConMovimientos = async () => {
+    const { rows } = await pool.query(
+        `SELECT TO_CHAR(LEAST(
+             (SELECT MIN(creado_en) FROM CARGA),
+             (SELECT MIN(marca_tiempo) FROM ESTADO_CARGA)
+         ), 'YYYY-MM-DD') AS desde`
+    );
+    return rows[0].desde;
+};
+
+/**
  * Resuelve y valida `fecha_desde`/`fecha_hasta` a partir del query string.
+ *
+ * Con `periodo=todo` no lleva fechas: el período es todo el historial y lo
+ * completa `obtenerMetricas` (ver `primerDiaConMovimientos`).
  *
  * Si faltan los dos, usa los últimos `DIAS_PERIODO_POR_DEFECTO` días (hasta
  * hoy, inclusive). Si falta sólo uno, se completa en relación al otro con el
@@ -81,9 +102,19 @@ const redondear = (numero) => {
  * el alta y la edición de una carga).
  *
  * @param {Record<string, unknown>} query - `req.query` de Express.
- * @returns {{ error: string } | { fechaDesde: string, fechaHasta: string }}
+ * @returns {{ error: string } | { todo: true } | { fechaDesde: string, fechaHasta: string }}
  */
 const resolverPeriodo = (query) => {
+    if (query.periodo !== undefined) {
+        if (query.periodo !== 'todo') {
+            return { error: "El parámetro 'periodo' sólo admite el valor 'todo'" };
+        }
+        if (query.fecha_desde !== undefined || query.fecha_hasta !== undefined) {
+            return { error: "'periodo=todo' no se combina con 'fecha_desde' ni 'fecha_hasta'" };
+        }
+        return { todo: true };
+    }
+
     const desdeQuery = typeof query.fecha_desde === 'string' ? query.fecha_desde.trim() : '';
     const hastaQuery = typeof query.fecha_hasta === 'string' ? query.fecha_hasta.trim() : '';
 
@@ -118,7 +149,10 @@ const resolverPeriodo = (query) => {
  * para administradores.
  *
  * Query params opcionales: `fecha_desde` y `fecha_hasta` (AAAA-MM-DD). Si
- * faltan los dos, el período son los últimos 30 días. `fecha_hasta` es
+ * faltan los dos, el período son los últimos 30 días. En su lugar puede ir
+ * `periodo=todo`: desde el primer día con movimientos hasta hoy (si todavía
+ * no hay ninguna carga, sólo hoy). `periodo` de la respuesta trae las fechas
+ * que se usaron. `fecha_hasta` es
  * inclusiva: cubre el día entero, por eso todas las consultas comparan contra
  * el día siguiente con `<` en vez de usar `<=` contra la fecha misma (que
  * dejaría afuera cualquier hora después de las 00:00). Ningún campo de fecha
@@ -159,12 +193,13 @@ const resolverPeriodo = (query) => {
  *   promedios y la tasa son `null`, los conteos son 0, pero la respuesta
  *   sigue siendo 200 con esta misma forma (nunca un error ni un cuerpo vacío).
  *
- * Respuestas: 200 con el resumen · 400 si el formato de fecha es inválido o
- * `fecha_desde` es posterior a `fecha_hasta` · 401/403
+ * Respuestas: 200 con el resumen · 400 si el formato de fecha es inválido,
+ * `fecha_desde` es posterior a `fecha_hasta`, `periodo` no es `todo` o viene
+ * junto con alguna fecha · 401/403
  * los resuelve el middleware (`verifyToken`/`requireRol`) · 500 ante un error
  * inesperado.
  *
- * @param {import('express').Request} req - request de Express. Query params opcionales: fecha_desde, fecha_hasta.
+ * @param {import('express').Request} req - request de Express. Query params opcionales: fecha_desde, fecha_hasta o periodo=todo.
  * @param {import('express').Response} res - response de Express.
  * @returns {Promise<void>}
  */
@@ -174,13 +209,20 @@ const obtenerMetricas = async (req, res) => {
         return res.status(400).json({ message: periodo.error });
     }
 
-    const { fechaDesde, fechaHasta } = periodo;
-    // Límite superior exclusivo: el día siguiente a `fecha_hasta`, para que
-    // "hasta inclusive" cubra cualquier hora de ese día sin tener que armar
-    // un `<=` contra la hora 23:59:59.999 a mano.
-    const fechaHastaExclusiva = sumarDias(fechaHasta, 1);
-
     try {
+        let { fechaDesde, fechaHasta } = periodo;
+        if (periodo.todo) {
+            fechaHasta = hoyIso();
+            const desde = await primerDiaConMovimientos();
+            // Una fecha guardada después de "hoy" en UTC (por la diferencia de
+            // zona) no puede dejar el período al revés.
+            fechaDesde = desde && desde < fechaHasta ? desde : fechaHasta;
+        }
+        // Límite superior exclusivo: el día siguiente a `fecha_hasta`, para que
+        // "hasta inclusive" cubra cualquier hora de ese día sin tener que armar
+        // un `<=` contra la hora 23:59:59.999 a mano.
+        const fechaHastaExclusiva = sumarDias(fechaHasta, 1);
+
         const [
             porEstadoResultado,
             asignacionResultado,
