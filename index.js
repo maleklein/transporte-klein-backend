@@ -30,7 +30,9 @@ app.post('/auth/login', authControllers.login);
 app.get('/health', saludControllers.verificarSalud);
 
 // Rutas de usuarios: administrar cuentas es tarea del administrador (HU 1.1, 1.2, 1.3).
+// GET /usuarios/:id es la ficha de un usuario; /usuarios/:id/reputacion, más abajo, es otra ruta.
 app.get('/usuarios', verifyToken, requireRol('administrador'), usuarioControllers.listarUsuarios);
+app.get('/usuarios/:id', verifyToken, requireRol('administrador'), usuarioControllers.obtenerUsuario);
 app.post('/usuarios', verifyToken, requireRol('administrador'), usuarioControllers.crearUsuario);
 app.put('/usuarios/:id', verifyToken, requireRol('administrador'), usuarioControllers.actualizarUsuario);
 

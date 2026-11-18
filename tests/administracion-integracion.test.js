@@ -73,6 +73,32 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
             assert.equal((await pedir('/usuarios?estado=borrado', 1)).estado, 400);
         });
 
+        await t.test('un usuario por id: solo el administrador, con los mismos datos que el listado', async () => {
+            assert.equal((await pedir('/usuarios/2', null)).estado, 401);
+            assert.equal((await pedir('/usuarios/2', 2)).estado, 403);
+
+            const listado = (await pedir('/usuarios', 1)).cuerpo;
+            for (const id of [1, 2, 3]) {
+                const ficha = await pedir(`/usuarios/${id}`, 1);
+                assert.equal(ficha.estado, 200);
+                assert.deepEqual(ficha.cuerpo, listado.find((u) => u.id_usuario === id));
+            }
+            const camionero = (await pedir('/usuarios/2', 1)).cuerpo;
+            assert.equal(camionero.camionero.tipo_vehiculo, 'Semirremolque');
+            assert.equal(camionero.contraseña_hash, undefined);
+            assert.equal((await pedir('/usuarios/1', 1)).cuerpo.camionero, undefined);
+
+            const inexistente = await pedir('/usuarios/999', 1);
+            assert.equal(inexistente.estado, 404);
+            assert.equal(inexistente.cuerpo.message, 'Usuario no encontrado');
+            const invalido = await pedir('/usuarios/abc', 1);
+            assert.equal(invalido.estado, 400);
+            assert.equal(invalido.cuerpo.message, "El parámetro 'id' debe ser numérico");
+
+            // La reputación es otra ruta y sigue respondiendo.
+            assert.equal((await pedir('/usuarios/2/reputacion', 1)).estado, 200);
+        });
+
         const nuevo = { nombre: 'Diego', apellido: 'Núñez', dni: '30111222', email: 'diego@example.test',
             contraseña: 'OtraClaveDePrueba', rol: 'camionero', ubicacion: 'Rosario, Santa Fe',
             tipo_vehiculo: 'Chasis', capacidad_kg: 12000 };
