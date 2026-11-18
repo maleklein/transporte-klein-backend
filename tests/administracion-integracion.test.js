@@ -328,6 +328,18 @@ test('administración: usuarios, parámetros, geografía y métricas con Postgre
             assert.equal((await pedir('/metricas?fecha_hasta=2026-10-31', 1)).cuerpo.periodo.fecha_desde, '2026-10-01');
             assert.equal((await pedir('/metricas?fecha_desde=2026-10-01', 1)).cuerpo.periodo.fecha_hasta,
                 new Date().toISOString().slice(0, 10));
+
+            // Todo el historial: desde el primer movimiento (el alta de las
+            // cargas 1, 3 y 4, el 05/10) hasta hoy, con las cuatro cargas.
+            const todo = await pedir('/metricas?periodo=todo', 1);
+            assert.equal(todo.estado, 200);
+            assert.deepEqual(todo.cuerpo.periodo,
+                { fecha_desde: '2026-10-05', fecha_hasta: new Date().toISOString().slice(0, 10) });
+            assert.equal(todo.cuerpo.total_cargas, 4);
+            assert.equal(todo.cuerpo.entregadas_por_semana[0].semana_inicio, '2026-10-05');
+            for (const consulta of ['?periodo=mes', '?periodo=todo&fecha_desde=2026-10-01']) {
+                assert.equal((await pedir(`/metricas${consulta}`, 1)).estado, 400, consulta);
+            }
         });
     } finally {
         if (servidor) await new Promise((resolve) => servidor.close(resolve));

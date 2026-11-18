@@ -6,18 +6,21 @@ cada número, para que el código y este documento no diverjan.
 
 ## Parámetros
 
-Query params opcionales, los dos en formato `AAAA-MM-DD`:
+Query params opcionales:
 
 | Parámetro | Significado |
 |---|---|
-| `fecha_desde` | Inicio del período, inclusive. |
-| `fecha_hasta` | Fin del período, **inclusive** (cubre el día entero, no sólo las 00:00). |
+| `fecha_desde` | Inicio del período (`AAAA-MM-DD`), inclusive. |
+| `fecha_hasta` | Fin del período (`AAAA-MM-DD`), **inclusive** (cubre el día entero, no sólo las 00:00). |
+| `periodo=todo` | Todo el historial, en lugar de las fechas: desde el primer día con movimientos (el alta de carga o el cambio de estado más viejo) hasta hoy. Sin ninguna carga todavía, sólo hoy. Es lo que pide el panel de Métricas al entrar. |
 
 Si faltan los dos, el período son los últimos 30 días (hasta hoy). Si falta
 sólo uno, el que falta se completa con el mismo criterio en relación al otro:
 sin `fecha_hasta` se usa hoy, y sin `fecha_desde` se usan 30 días antes de
 `fecha_hasta`. Responde 400 si el formato de alguno es inválido o si
-`fecha_desde` es posterior a `fecha_hasta`.
+`fecha_desde` es posterior a `fecha_hasta`. Con `periodo`, responde 400 si
+su valor no es `todo` o si viene junto con alguna de las dos fechas. En todos
+los casos, `periodo` de la respuesta trae las fechas que se usaron.
 
 Ninguna fecha se convierte de zona horaria: `ESTADO_CARGA.marca_tiempo` y
 `CARGA.creado_en` son `timestamp without time zone`, se comparan tal cual
