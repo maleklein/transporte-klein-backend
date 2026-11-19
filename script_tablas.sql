@@ -106,7 +106,9 @@ CREATE TABLE CARGA (
     direccion_destino VARCHAR(150),
     tipo_carga VARCHAR(100) NOT NULL,
     peso_kg NUMERIC NOT NULL,
-    fecha DATE NOT NULL,
+    -- Fecha de retiro. Opcional: a veces se acuerda después de cargar el
+    -- viaje (NULL = a coordinar); sin fecha, la carga no vence.
+    fecha DATE,
     observaciones TEXT,
     -- Distancia por ruta entre origen y destino, calculada con el
     -- servicio de mapas al dar de alta la carga (HU 9).

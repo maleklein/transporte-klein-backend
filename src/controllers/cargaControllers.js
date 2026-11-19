@@ -406,11 +406,12 @@ const listarCargas = async (req, res) => {
                AND ($2 = '' OR c.fecha = $2::date)
                AND ($3 = '' OR pd.id_provincia = $3)
                AND ($4 = '' OR c.id_localidad_destino = $4)
-               AND ($5::date IS NULL OR c.fecha >= $5::date)
+               -- Sin fecha de retiro (a coordinar) no vence: el camionero la ve.
+               AND ($5::date IS NULL OR c.fecha IS NULL OR c.fecha >= $5::date)
                -- Igual que las métricas: desde el primer día hasta el último inclusive.
                AND ($6 = '' OR c.creado_en >= $6::date)
                AND ($7 = '' OR c.creado_en < $7::date + 1)
-             ORDER BY c.fecha, c.id_carga`,
+             ORDER BY c.fecha NULLS LAST, c.id_carga`,
             [estadosVisibles, filtroFecha, filtroProvincia, filtroLocalidad, retiroDesde,
                 filtroCreadaDesde, filtroCreadaHasta]
         );
@@ -647,7 +648,10 @@ const actualizarCarga = async (req, res) => {
 
         // La fecha sólo se controla si cambió: si no, una carga aceptada cuyo
         // retiro ya pasó no podría corregir ningún otro dato.
-        const errorFecha = valores.fecha === anterior.fecha ? null : validarFechaNoPasada(valores.fecha);
+        // Sacarle la fecha (pasa a "a coordinar") tampoco se controla.
+        const errorFecha = valores.fecha === anterior.fecha || valores.fecha === null
+            ? null
+            : validarFechaNoPasada(valores.fecha);
 
         const erroresLocalidad = await verificarLocalidades(pool, valores);
         if (errorFecha) erroresLocalidad.fecha = errorFecha;

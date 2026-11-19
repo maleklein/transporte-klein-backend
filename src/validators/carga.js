@@ -182,7 +182,7 @@ const validarFechaNoPasada = (fecha, hoy = hoyEnArgentina()) =>
  * @param {Record<string, unknown>} body - req.body de Express.
  * @returns {{
  *   errores: Record<string, string>,
- *   valores: {origen_id?: string, destino_id?: string, direccion_origen?: string|null, direccion_destino?: string|null, tipo_carga?: string, observaciones?: string|null, peso?: number, fecha?: string}
+ *   valores: {origen_id?: string, destino_id?: string, direccion_origen?: string|null, direccion_destino?: string|null, tipo_carga?: string, observaciones?: string|null, peso?: number, fecha?: string|null}
  * }} errores agrupados por campo, y los valores ya limpios/normalizados de los campos que pasaron.
  */
 const validarCampos = (body) => {
@@ -253,10 +253,14 @@ const validarCampos = (body) => {
         }
     }
 
+    // Opcional: a veces el retiro se acuerda después de cargar el viaje. Sin
+    // fecha queda en null ("a coordinar") y la carga no vence.
     const fecha = typeof body.fecha === 'string' ? body.fecha.trim() : '';
 
-    if (fecha === '') {
-        errores.fecha = "El campo 'fecha' es obligatorio";
+    if (body.fecha !== undefined && body.fecha !== null && typeof body.fecha !== 'string') {
+        errores.fecha = "El campo 'fecha' debe tener formato AAAA-MM-DD";
+    } else if (fecha === '') {
+        valores.fecha = null;
     } else if (!esFechaValida(fecha)) {
         errores.fecha = "El campo 'fecha' debe tener formato AAAA-MM-DD";
     } else {
