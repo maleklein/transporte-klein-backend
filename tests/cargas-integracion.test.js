@@ -152,6 +152,29 @@ test('Cargas: fecha de retiro, dirección, capacidad y avisos', {
             assert.ok(delPostulado.includes('carga_cancelada'));
             const cancelada = (await avisos(4, idCarga)).find((aviso) => aviso.tipo_evento === 'carga_cancelada');
             assert.equal(cancelada.contenido, 'Se canceló la carga Paraná, Entre Ríos → Otra localidad, Entre Ríos a la que te habías postulado.');
+
+            // La postulación no queda esperando una asignación que ya no va a pasar.
+            const postulados = await pedir(`/cargas/${idCarga}/postulaciones`, 1);
+            assert.equal(postulados.estado, 200);
+            assert.deepEqual(postulados.cuerpo.map((p) => p.estado), ['rechazada']);
+        });
+
+        await t.test('cancelar con el cambio de estado general también cierra las postulaciones', async () => {
+            const carga = await pedir('/cargas', 1, { method: 'POST', body: nueva({ tipo_carga: 'Cancelada por estado', peso: 700 }) });
+            assert.equal(carga.estado, 201);
+            const id = carga.cuerpo.id_carga;
+            for (const camionero of [2, 4]) {
+                assert.equal((await pedir(`/cargas/${id}/postulaciones`, camionero, { method: 'POST' })).estado, 201);
+            }
+
+            const cambio = await pedir(`/cargas/${id}/estado`, 1, { method: 'PATCH', body: { estado: 'cancelada' } });
+            assert.equal(cambio.estado, 200);
+
+            const postulados = await pedir(`/cargas/${id}/postulaciones`, 1);
+            assert.deepEqual(postulados.cuerpo.map((p) => p.estado), ['rechazada', 'rechazada']);
+            for (const camionero of [2, 4]) {
+                assert.ok((await avisos(camionero, id)).some((aviso) => aviso.tipo_evento === 'carga_cancelada'));
+            }
         });
 
         await t.test('el listado le dice al administrador cuántos postulados esperan, y al camionero no', async () => {

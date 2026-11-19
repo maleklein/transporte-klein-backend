@@ -1,9 +1,11 @@
 /**
  * Servicio de bitácora de estados de carga (HU 8).
- * Deja registrado cada cambio de estado en ESTADO_CARGA y avisa del cambio a
- * las partes de la carga (HU 12).
+ * Deja registrado cada cambio de estado en ESTADO_CARGA, avisa del cambio a
+ * las partes de la carga (HU 12) y, si la carga se cancela, cierra las
+ * postulaciones que quedaban en espera.
  */
 
+const { ESTADOS } = require('../domain/estadosCarga');
 const { notificarCambioEstado } = require('./notificaciones');
 
 /**
@@ -18,6 +20,14 @@ const { notificarCambioEstado } = require('./notificaciones');
  * de la carga (HU 12). Se engancha acá y no en cada endpoint porque todo
  * cambio de estado pasa por la bitácora: así ninguna transición, de hoy o
  * futura, se queda sin aviso por olvido.
+ *
+ * Por lo mismo, si el estado nuevo es "cancelada", las postulaciones que
+ * seguían en espera pasan a "rechazada": la carga ya no se va a asignar, y
+ * antes quedaban "pendiente" para siempre (el detalle de una carga cancelada
+ * mostraba a sus postulados "En espera"). Se puede cancelar desde
+ * `PATCH /cargas/:id/cancelar` y desde `PATCH /cargas/:id/estado`, y los dos
+ * pasan por acá. El aviso a esos camioneros ya lo manda `notificarCancelacion`
+ * ("Se canceló la carga … a la que te habías postulado.").
  *
  * @param {number} idCarga - id de la carga a la que pertenece el cambio.
  * @param {string|null} estadoAnterior - estado antes del cambio, o null si es el alta.
@@ -35,6 +45,13 @@ const registrarCambioEstado = async (idCarga, estadoAnterior, estadoNuevo, idAct
     );
 
     await notificarCambioEstado(idCarga, estadoAnterior, estadoNuevo, idActor, client);
+
+    if (estadoNuevo === ESTADOS.CANCELADA) {
+        await client.query(
+            "UPDATE POSTULACION SET estado = 'rechazada' WHERE id_carga = $1 AND estado = 'pendiente'",
+            [idCarga]
+        );
+    }
 
     return resultado.rows[0];
 };
