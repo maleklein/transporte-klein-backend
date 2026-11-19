@@ -10,6 +10,7 @@ const { notificarAsignacion } = require('../services/notificaciones');
 const { COLUMNAS_UBICACION, JOIN_UBICACION } = require('../services/ubicacionCarga');
 const { COLUMNAS_COSTOS } = require('../services/parametrosOperativos');
 const { ESTADOS } = require('../domain/estadosCarga');
+const { hoyEnArgentina } = require('../validators/carga');
 
 /**
  * POST /cargas/:id/asignar: asigna una carga a uno de sus camioneros postulados.
@@ -61,7 +62,8 @@ const asignarCamionero = async (req, res) => {
 
         // 1. Validar que la carga exista, esté pendiente y no tenga otro camionero asignado
         const cargaRes = await client.query(
-            'SELECT estado_actual, id_camionero_asignado FROM CARGA WHERE id_carga = $1 FOR UPDATE',
+            `SELECT estado_actual, id_camionero_asignado, TO_CHAR(fecha, 'YYYY-MM-DD') AS fecha
+             FROM CARGA WHERE id_carga = $1 FOR UPDATE`,
             [idCarga]
         );
 
@@ -80,6 +82,16 @@ const asignarCamionero = async (req, res) => {
             await client.query('ROLLBACK');
             return res.status(409).json({
                 message: `Sólo se puede asignar una carga pendiente, es decir, con postulaciones. Esta está en '${carga.estado_actual}'.`,
+            });
+        }
+
+        // Con el retiro vencido no es un viaje posible: igual que una
+        // postulación, la asignación se rechaza hasta que le cambien la fecha
+        // (o la cancelen). Sin fecha de retiro (se acuerda después), no vence.
+        if (carga.fecha && carga.fecha < hoyEnArgentina()) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                message: 'La fecha de retiro de esta carga ya pasó: cambiale la fecha o cancelala antes de asignarla.',
             });
         }
 

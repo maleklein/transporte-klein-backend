@@ -76,7 +76,8 @@ const crearPostulacion = async (req, res) => {
 
         // Con el retiro vencido ya no es un viaje posible: el administrador
         // tiene que cambiarle la fecha o cancelarla.
-        if (fecha < hoyEnArgentina()) {
+        // Sin fecha de retiro (se acuerda después) no vence.
+        if (fecha && fecha < hoyEnArgentina()) {
             await client.query('ROLLBACK');
             return res.status(409).json({ message: 'La fecha de retiro de esta carga ya pasó: no recibe más postulaciones.' });
         }

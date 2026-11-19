@@ -122,6 +122,46 @@ test('Cargas: fecha de retiro, dirección, capacidad y avisos', {
             assert.equal(postulacion.cuerpo.message, 'La fecha de retiro de esta carga ya pasó: no recibe más postulaciones.');
         });
 
+        await t.test('no se puede asignar una carga con el retiro vencido, aunque tenga postulados', async () => {
+            // Pendiente, con un postulado de antes, y el retiro ya pasado.
+            await db.query(`INSERT INTO CARGA (id_carga,id_localidad_origen,id_localidad_destino,tipo_carga,peso_kg,fecha,estado_actual,id_admin_creador)
+                VALUES (301,'30000001','30000002','Vencida con postulado',500,'2020-01-01','pendiente',1)`);
+            await db.query("INSERT INTO POSTULACION (id_carga,id_camionero,estado) VALUES (301,4,'pendiente')");
+
+            const asignacion = await pedir('/cargas/301/asignar', 1, { method: 'POST', body: { id_camionero: 4 } });
+            assert.equal(asignacion.estado, 409);
+            assert.equal(asignacion.cuerpo.message, 'La fecha de retiro de esta carga ya pasó: cambiale la fecha o cancelala antes de asignarla.');
+
+            // Con la fecha cambiada, sí.
+            assert.equal((await pedir('/cargas/301', 1, { method: 'PUT', body: nueva({ tipo_carga: 'Vencida con postulado', peso: 500, fecha: '2099-01-01' }) })).estado, 200);
+            assert.equal((await pedir('/cargas/301/asignar', 1, { method: 'POST', body: { id_camionero: 4 } })).estado, 200);
+        });
+
+        await t.test('fecha de retiro opcional: sin fecha no vence, se ve, se postula y se asigna', async () => {
+            const alta = await pedir('/cargas', 1, { method: 'POST', body: nueva({ tipo_carga: 'Sin fecha', fecha: '' }) });
+            assert.equal(alta.estado, 201);
+            assert.equal(alta.cuerpo.fecha, null);
+            const id = alta.cuerpo.id_carga;
+
+            const aviso = (await avisos(4, id)).find((item) => item.tipo_evento === 'carga_nueva');
+            assert.match(aviso.contenido, /con fecha de retiro a coordinar\.$/);
+
+            const listado = await pedir('/cargas', 4);
+            assert.ok(listado.cuerpo.some((carga) => carga.id_carga === id), 'el camionero la ve');
+            const primeraSinFecha = listado.cuerpo.findIndex((carga) => carga.fecha === null);
+            assert.ok(listado.cuerpo.slice(primeraSinFecha).every((carga) => carga.fecha === null), 'las sin fecha van al final');
+
+            assert.equal((await pedir(`/cargas/${id}/postulaciones`, 4, { method: 'POST' })).estado, 201);
+            assert.equal((await pedir(`/cargas/${id}/asignar`, 1, { method: 'POST', body: { id_camionero: 4 } })).estado, 200);
+
+            // Se le pone la fecha después, y también se le puede volver a sacar.
+            const conFecha = await pedir(`/cargas/${id}`, 1, { method: 'PUT', body: nueva({ tipo_carga: 'Sin fecha', fecha: '2099-12-01' }) });
+            assert.equal(conFecha.cuerpo.fecha, '2099-12-01');
+            const sinFecha = await pedir(`/cargas/${id}`, 1, { method: 'PUT', body: nueva({ tipo_carga: 'Sin fecha' , fecha: null }) });
+            assert.equal(sinFecha.estado, 200);
+            assert.equal(sinFecha.cuerpo.fecha, null);
+        });
+
         await t.test('editar: la fecha vencida se puede conservar, pero no poner una nueva en el pasado', async () => {
             const sinCambiarFecha = await pedir('/cargas/100', 1, { method: 'PUT', body: nueva({
                 fecha: '2020-01-01', peso: 500, observaciones: 'Corregida',

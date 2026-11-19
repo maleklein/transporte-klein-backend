@@ -60,3 +60,17 @@ test('la fecha de retiro puede ser hoy o después, nunca antes', () => {
     // Sin "hoy" explícito usa el de Argentina.
     assert.equal(validarFechaNoPasada('2000-01-01'), 'La fecha de retiro no puede ser anterior a hoy');
 });
+
+test('la fecha de retiro es opcional: vacía o ausente queda en null ("a coordinar")', () => {
+    for (const vacio of [undefined, null, '', '   ']) {
+        const { errores, valores } = validarCampos(cargaValida({ fecha: vacio }));
+        assert.deepEqual(errores, {});
+        assert.equal(valores.fecha, null);
+    }
+});
+
+test('una fecha que no es texto AAAA-MM-DD sigue siendo un error', () => {
+    for (const mala of [20991120, '20/11/2099', '2099-02-30']) {
+        assert.equal(validarCampos(cargaValida({ fecha: mala })).errores.fecha, "El campo 'fecha' debe tener formato AAAA-MM-DD");
+    }
+});

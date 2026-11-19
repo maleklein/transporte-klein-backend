@@ -85,7 +85,8 @@ const ruta = (carga) => `${carga.origen} → ${carga.destino}`;
  * @returns {string} "Cereales, 12.500 kg, con retiro el 15/10/2026".
  */
 const datosDelViaje = (carga) =>
-    `${carga.tipo_carga}, ${Number(carga.peso_kg).toLocaleString('es-AR')} kg, con retiro el ${carga.fecha}`;
+    `${carga.tipo_carga}, ${Number(carga.peso_kg).toLocaleString('es-AR')} kg, ${
+        carga.fecha ? `con retiro el ${carga.fecha}` : 'con fecha de retiro a coordinar'}`;
 
 /**
  * Guarda un aviso para un usuario.
