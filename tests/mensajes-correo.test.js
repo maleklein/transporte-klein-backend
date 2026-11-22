@@ -2,6 +2,10 @@
 // el frontend dice "correo electrónico", así que la API tiene que decir lo mismo.
 const { test, mock } = require('node:test');
 const assert = require('node:assert/strict');
+const { randomBytes } = require('node:crypto');
+
+// authControllers exige JWT_SECRET al cargarse; en CI no hay .env.
+process.env.JWT_SECRET = randomBytes(32).toString('hex');
 
 const pool = require('../src/db');
 const { login } = require('../src/controllers/authControllers');
