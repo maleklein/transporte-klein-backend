@@ -259,6 +259,51 @@ test('Cargas: fecha de retiro, dirección, capacidad y avisos', {
             }
         });
 
+        await t.test('listado paginado: de a 20, con el total, sin repetir ni saltear', async () => {
+            // 23 cargas con la misma fecha de retiro, para aislarlas con el filtro.
+            // Las 5 primeras pesan 2000 kg: más de lo que lleva el camionero 2.
+            await db.query(`INSERT INTO CARGA (id_localidad_origen,id_localidad_destino,tipo_carga,peso_kg,fecha,estado_actual,id_admin_creador)
+                SELECT '30000001','30000002','Paginada ' || n, CASE WHEN n <= 5 THEN 2000 ELSE 500 END,
+                       '2030-05-05','disponible',1
+                FROM generate_series(1, 23) AS n`);
+            const todas = (await pedir('/cargas?fecha=2030-05-05', 1)).cuerpo;
+            assert.ok(Array.isArray(todas), 'sin pagina responde como antes: el array');
+            assert.equal(todas.length, 23);
+
+            const primera = await pedir('/cargas?fecha=2030-05-05&pagina=1', 1);
+            assert.equal(primera.estado, 200);
+            assert.equal(primera.cuerpo.cargas.length, 20);
+            assert.equal(primera.cuerpo.total, 23);
+            assert.equal(primera.cuerpo.pagina, 1);
+            assert.equal(primera.cuerpo.por_pagina, 20);
+            const segunda = (await pedir('/cargas?fecha=2030-05-05&pagina=2', 1)).cuerpo;
+            assert.equal(segunda.cargas.length, 3);
+            assert.deepEqual(
+                [...primera.cuerpo.cargas, ...segunda.cargas].map((carga) => carga.id_carga),
+                todas.map((carga) => carga.id_carga),
+                'las dos páginas juntas son el listado completo, en el mismo orden',
+            );
+
+            const despuesDeLaUltima = (await pedir('/cargas?fecha=2030-05-05&pagina=3', 1)).cuerpo;
+            assert.deepEqual(despuesDeLaUltima.cargas, []);
+            assert.equal(despuesDeLaUltima.total, 23, 'igual dice cuántas hay, para volver a la última');
+
+            for (const pagina of ['0', '-1', 'dos', '1.5', '']) {
+                assert.equal((await pedir(`/cargas?pagina=${pagina}`, 1)).estado, 400, `pagina=${pagina}`);
+            }
+
+            // Al camionero, primero las que puede llevar: las 5 pesadas quedan al final.
+            const delCamionero = [
+                ...(await pedir('/cargas?fecha=2030-05-05&pagina=1', 2)).cuerpo.cargas,
+                ...(await pedir('/cargas?fecha=2030-05-05&pagina=2', 2)).cuerpo.cargas,
+            ];
+            assert.equal(delCamionero.length, 23);
+            assert.deepEqual(
+                delCamionero.map((carga) => Number(carga.peso_kg)),
+                [...Array(18).fill(500), ...Array(5).fill(2000)],
+            );
+        });
+
         await t.test('notificaciones de a partes: limite y antes_de, sin repetir ni saltear', async () => {
             // 25 avisos al camionero 5; varios comparten creado_en, como los de
             // una misma transacción, para probar el desempate por id.
