@@ -24,6 +24,13 @@ const {
 const ESTADO_INICIAL = ESTADOS.DISPONIBLE;
 
 /**
+ * Cargas por página del listado (`GET /cargas?pagina=N`). El mismo número que
+ * usa el front para las notificaciones: en la computadora son una o dos
+ * pantallas de tabla y en el celular unas tres o cuatro de lista.
+ */
+const CARGAS_POR_PAGINA = 20;
+
+/**
  * Estados desde los que no se puede editar una carga (HU 2.2): una vez que
  * está en viaje o fue entregada, sus datos son el registro de lo que
  * efectivamente pasó, no un borrador que se pueda seguir corrigiendo. Para
@@ -326,11 +333,24 @@ const crearCarga = async (req, res) => {
  * tarjetas de las cargas pendientes dicen "3 postulados" sin abrir cada una.
  * Al camionero no se le manda: cuántos compiten por una carga no es dato suyo.
  *
- * Respuestas: 200 con el array de cargas · 400 si `fecha`, `creada_desde` o
- * `creada_hasta` tienen formato inválido, o si `creada_desde` es posterior a
- * `creada_hasta` · 500 ante un error inesperado.
+ * Paginación: con `pagina` (entero desde 1) devuelve de a `CARGAS_POR_PAGINA`
+ * y responde `{ cargas, total, pagina, por_pagina }`, donde `total` es cuántas
+ * pasan los filtros en todas las páginas. Si `pagina` pasa de la última,
+ * `cargas` viene vacío y `total` igual dice cuántas hay, para que el front
+ * vuelva a la última. Sin `pagina` responde como antes, el array con todas:
+ * lo siguen usando los paneles de inicio, que sólo cuentan.
  *
- * @param {import('express').Request} req - request de Express. Query params opcionales: estado, fecha, destino_provincia, destino_localidad, creada_desde, creada_hasta.
+ * Orden: por fecha de retiro (las que no tienen, al final) y por id, así una
+ * carga no cambia de página entre un pedido y otro. Al camionero, primero las
+ * que puede llevar: las que superan la capacidad de su vehículo van al final,
+ * donde el front las muestra aparte (HU 4).
+ *
+ * Respuestas: 200 con el array de cargas (o el objeto de la página) · 400 si
+ * `fecha`, `creada_desde` o `creada_hasta` tienen formato inválido, si
+ * `creada_desde` es posterior a `creada_hasta` o si `pagina` no es un entero
+ * positivo · 500 ante un error inesperado.
+ *
+ * @param {import('express').Request} req - request de Express. Query params opcionales: estado, fecha, destino_provincia, destino_localidad, creada_desde, creada_hasta, pagina.
  * @param {import('express').Response} res - response de Express.
  * @returns {Promise<void>}
  */
@@ -369,6 +389,14 @@ const listarCargas = async (req, res) => {
         return res.status(400).json({ message: "'creada_desde' no puede ser posterior a 'creada_hasta'" });
     }
 
+    let pagina = null;
+    if (req.query.pagina !== undefined) {
+        pagina = Number(req.query.pagina);
+        if (!Number.isInteger(pagina) || pagina < 1) {
+            return res.status(400).json({ message: "'pagina' debe ser un número entero mayor que 0" });
+        }
+    }
+
     const filtroEstado = estado ? String(estado).trim() : '';
 
     // HU 3: al camionero sólo se le muestran las cargas a las que se puede
@@ -390,7 +418,26 @@ const listarCargas = async (req, res) => {
     // para cambiarles la fecha o cancelarlas.
     const retiroDesde = esCamionero ? hoyEnArgentina() : null;
 
+    // Filtros compartidos por la consulta de la página y por la que cuenta.
+    const condiciones = `
+             WHERE ($1::text[] IS NULL OR c.estado_actual = ANY($1::text[]))
+               AND ($2 = '' OR c.fecha = $2::date)
+               AND ($3 = '' OR pd.id_provincia = $3)
+               AND ($4 = '' OR c.id_localidad_destino = $4)
+               -- Sin fecha de retiro (a coordinar) no vence: el camionero la ve.
+               AND ($5::date IS NULL OR c.fecha IS NULL OR c.fecha >= $5::date)
+               -- Igual que las métricas: desde el primer día hasta el último inclusive.
+               AND ($6 = '' OR c.creado_en >= $6::date)
+               AND ($7 = '' OR c.creado_en < $7::date + 1)`;
+    const parametrosFiltro = [estadosVisibles, filtroFecha, filtroProvincia, filtroLocalidad, retiroDesde,
+        filtroCreadaDesde, filtroCreadaHasta];
+
     try {
+        // Se necesita antes de la consulta: ordena las que puede llevar primero.
+        const capacidad = esCamionero ? await capacidadDelCamionero(req.usuario.id) : null;
+
+        // Sin capacidad cargada no puede llevar ninguna: todas "superan" (mismo
+        // criterio que `motivoSinCapacidad` del front y que la postulación).
         const resultado = await pool.query(
             `SELECT c.id_carga,${COLUMNAS_UBICACION},
                     c.tipo_carga, c.peso_kg,
@@ -401,30 +448,34 @@ const listarCargas = async (req, res) => {
                     c.estado_actual,${COLUMNAS_DISTANCIA},
                     (SELECT COUNT(*)::int FROM POSTULACION p
                      WHERE p.id_carga = c.id_carga AND p.estado = 'pendiente') AS cantidad_postulados
-             FROM CARGA c${JOIN_UBICACION}
-             WHERE ($1::text[] IS NULL OR c.estado_actual = ANY($1::text[]))
-               AND ($2 = '' OR c.fecha = $2::date)
-               AND ($3 = '' OR pd.id_provincia = $3)
-               AND ($4 = '' OR c.id_localidad_destino = $4)
-               -- Sin fecha de retiro (a coordinar) no vence: el camionero la ve.
-               AND ($5::date IS NULL OR c.fecha IS NULL OR c.fecha >= $5::date)
-               -- Igual que las métricas: desde el primer día hasta el último inclusive.
-               AND ($6 = '' OR c.creado_en >= $6::date)
-               AND ($7 = '' OR c.creado_en < $7::date + 1)
-             ORDER BY c.fecha NULLS LAST, c.id_carga`,
-            [estadosVisibles, filtroFecha, filtroProvincia, filtroLocalidad, retiroDesde,
-                filtroCreadaDesde, filtroCreadaHasta]
+             FROM CARGA c${JOIN_UBICACION}${condiciones}
+             ORDER BY CASE WHEN $8::boolean THEN ($9::numeric IS NULL OR c.peso_kg > $9::numeric) ELSE false END,
+                      c.fecha NULLS LAST, c.id_carga
+             LIMIT $10 OFFSET $11`,
+            [...parametrosFiltro, esCamionero, capacidad,
+                pagina === null ? null : CARGAS_POR_PAGINA,
+                pagina === null ? 0 : (pagina - 1) * CARGAS_POR_PAGINA]
         );
 
         if (esCamionero) {
-            const capacidad = await capacidadDelCamionero(req.usuario.id);
             for (const carga of resultado.rows) {
                 carga.capacidad_camionero_kg = capacidad;
                 delete carga.cantidad_postulados;
             }
         }
 
-        return res.status(200).json(resultado.rows);
+        if (pagina === null) return res.status(200).json(resultado.rows);
+
+        const conteo = await pool.query(
+            `SELECT COUNT(*)::int AS total FROM CARGA c${JOIN_UBICACION}${condiciones}`,
+            parametrosFiltro
+        );
+        return res.status(200).json({
+            cargas: resultado.rows,
+            total: conteo.rows[0].total,
+            pagina,
+            por_pagina: CARGAS_POR_PAGINA,
+        });
     } catch (error) {
         console.error(error);
         return res.status(500).json({ message: 'Error interno del servidor' });

@@ -163,6 +163,7 @@ tests/                       tests unitarios, de HTTP y de integración
 
 | Tema | Documento |
 |---|---|
+| Listado de cargas: filtros y paginación (HU 2.5 y HU 3) | [docs/hu2-5-listado-cargas.md](docs/hu2-5-listado-cargas.md) |
 | Postulaciones y asignación (HU 4 y HU 6) | [docs/hu4-hu6-postulaciones.md](docs/hu4-hu6-postulaciones.md) |
 | Matching de camioneros (HU 5) | [docs/hu5-matching.md](docs/hu5-matching.md) y la verificación con mapas en [docs/hu5-validacion-mapas.md](docs/hu5-validacion-mapas.md) |
 | Kilómetros estimados (HU 9) | [docs/hu9-kilometros.md](docs/hu9-kilometros.md) |
