@@ -125,10 +125,10 @@ const validarEmail = (valor) => {
     const texto = String(valor).trim();
 
     if (texto.length > LARGO_MAXIMO_EMAIL) {
-        return { error: `El email no puede superar los ${LARGO_MAXIMO_EMAIL} caracteres.` };
+        return { error: `El correo electrónico no puede superar los ${LARGO_MAXIMO_EMAIL} caracteres.` };
     }
     if (!isEmail(texto)) {
-        return { error: 'El email no tiene un formato válido.' };
+        return { error: 'El correo electrónico no tiene un formato válido.' };
     }
 
     return { valor: texto };
@@ -261,7 +261,7 @@ const validarDatosDeCamionero = (body) => {
  * @returns {string} el mensaje para el usuario.
  */
 const mensajeDeDuplicado = (error) =>
-    `El ${error.constraint === 'usuario_dni_key' ? 'DNI' : 'email'} ya está registrado`;
+    `El ${error.constraint === 'usuario_dni_key' ? 'DNI' : 'correo electrónico'} ya está registrado`;
 
 /**
  * Controlador de POST /usuarios: da de alta un usuario (administrador o camionero).
@@ -319,7 +319,7 @@ const crearUsuario = async (req, res) => {
         // LOWER() de los dos lados: "ana@mail.com" y "ANA@mail.com" son el mismo email.
         const emailExistente = await pool.query('SELECT id_usuario FROM USUARIO WHERE LOWER(email) = LOWER($1)', [email]);
         if (emailExistente.rows.length > 0) {
-            return res.status(400).json({ message: 'El email ya está registrado' });
+            return res.status(400).json({ message: 'El correo electrónico ya está registrado' });
         }
 
         const contraseñaHash = await bcrypt.hash(contraseña, 10);
@@ -456,7 +456,7 @@ const actualizarUsuario = async (req, res) => {
             [email, idUsuario]
         );
         if (emailExistente.rows.length > 0) {
-            return res.status(400).json({ message: 'El email ya está registrado' });
+            return res.status(400).json({ message: 'El correo electrónico ya está registrado' });
         }
 
         // Transacción: si el usuario es camionero, los dos UPDATE (USUARIO y CAMIONERO)

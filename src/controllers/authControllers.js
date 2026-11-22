@@ -20,7 +20,7 @@ const login = async (req, res) => {
     try {
         //Compruebo que no falte el email o la contraseña
         if (!email || !contraseña) {
-            return res.status(400).json({ message: 'Por favor, ingresá el email y la contraseña.' });
+            return res.status(400).json({ message: 'Por favor, ingresá el correo electrónico y la contraseña.' });
         }
 
         // 1. Buscar si el usuario existe en la base de datos
